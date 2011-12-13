@@ -128,3 +128,20 @@
     (Analysis 1 succ-states pop-succ-states push? pop? state-equal?)))
 
 (CFA2 reachability)
+
+
+(require rackunit
+         rackunit/text-ui)
+
+(define-test-suite cfa2-tests
+  (test-case
+   "CFA2 reachability"
+   (define-values (Paths Summaries Callers) (CFA2 reachability))
+   (check-true (set=? (set (Path 1 8) (Path 4 4) (Path 4 5) (Path 1 9) (Path 1 2) (Path 4 6) (Path 1 10) (Path 3 3) (Path 3 7))
+                      Paths))
+   (check-true (set=? (set (Summary 4 6) (Summary 1 10) (Summary 3 7))
+                      Summaries))
+   (check-true (set=? (set (Call 3 4) (Call 1 3))
+                      Callers))))
+
+(run-tests cfa2-tests)
