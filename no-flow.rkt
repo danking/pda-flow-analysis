@@ -121,7 +121,7 @@
                                           7 (set 8)
                                           8 (set 9)
                                           9 (set 10)
-                                          10 (set 11))
+                                          10 (set))
                                   s))]
          [pop-succ-states (lambda (push pop)
                             (succ-states pop))])
