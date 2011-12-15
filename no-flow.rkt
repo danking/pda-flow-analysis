@@ -106,7 +106,6 @@
               (set-union new-Paths Paths)))))
 
 
-
 (define (reachability)
   (define-struct State (node env astack) #:transparent)
   (define-struct PushNode (value id) #:transparent)
