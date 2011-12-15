@@ -58,8 +58,9 @@
                    (if (for/or ([sum (in-set Summaries)])
                                (match sum
                                  ((Summary push _) (state-equal? push push2))))
-                       (for/fold ([W W]
-                                  [Paths Paths])
+                       (for/fold
+                           ([W W]
+                            [Paths Paths])
                            ([sum (in-set Summaries)]
                             #:when
                             (match sum
@@ -104,27 +105,56 @@
       (values (set-union new-W W)
               (set-union new-Paths Paths)))))
 
-(define reachability
-  (let* ([push? (lambda (s)
-                  (set-member? (set 1 3 4) s))]
-         [pop? (lambda (s)
-                 (set-member? (set 6 7 10) s))]
-         [state-equal? (lambda (s1 s2)
-                         (= s1 s2))]
-         [succ-states (lambda (s)
-                        (hash-ref (hasheq 1 (set 2)
-                                          2 (set 3)
-                                          3 (set 4)
-                                          4 (set 5)
-                                          5 (set 6)
-                                          6 (set 7)
-                                          7 (set 8)
-                                          8 (set 9)
-                                          9 (set 10)
-                                          10 (set 11))
-                                  s))]
-         [pop-succ-states (lambda (push pop)
-                            (succ-states pop))])
-    (Analysis 1 succ-states pop-succ-states push? pop? state-equal?)))
 
-(CFA2 reachability)
+
+(define (reachability)
+  (define-struct State (node env astack) #:transparent)
+  (define-struct PushNode (value id) #:transparent)
+  (define-struct PopNode (var id) #:transparent)
+  (define-struct Noop (id) #:transparent)
+
+
+  (define push?
+    (match-lambda ((State node _ _)
+                   (PushNode? node))))
+  (define pop?
+    (match-lambda ((State node _ _)
+                   (PopNode? node))))
+  (define state-equal? equal?)
+  (define (succ-nodes node)
+    (hash-ref (hash (PushNode 'a 0) (set (Noop 1))
+                    (Noop 1) (set (PushNode 'b 2))
+                    (PushNode 'b 2) (set (PushNode 'c 3))
+                    (PushNode 'c 3) (set (Noop 4))
+                    (Noop 4) (set (PopNode 'var1 5) (PushNode 'b 2))
+                    (PopNode 'var1 5) (set (PopNode 'var2 6))
+                    (PopNode 'var2 6) (set (Noop 7))
+                    (Noop 7) (set (Noop 8))
+                    (Noop 8) (set (PopNode 'var3 9))
+                    (PopNode 'var3 9) (set (PopNode 'var3 9)))
+              node))
+  (define (succ-states state)
+    (match-let (((State node env astack) state))
+      (match node
+        ((PushNode value _) (for/set ([succ-node (succ-nodes node)])
+                              (State succ-node env value)))
+        (_ (for/set ([succ-node (succ-nodes node)])
+             (State succ-node env astack))))))
+  (define (pop-succ-states push pop)
+    (match-let (((State push-node _ previous-stack) push)
+                ((State pop-node env _) pop))
+      (match-let (((PopNode var _) pop-node))
+        (for/set ([succ-node (succ-nodes pop-node)])
+          (State succ-node
+                 (update-env env var previous-stack)
+                 previous-stack)))))
+  (define (update-env env var val)
+    (hash-set env var val))
+  (Analysis (State (PushNode 'a 0) (hash) 'ε)
+            succ-states
+            pop-succ-states
+            push?
+            pop?
+            state-equal?))
+
+(CFA2 (reachability))
