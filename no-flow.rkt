@@ -1,16 +1,27 @@
 #lang racket
 
+(define-syntax (with-for/fold stx)
+ (syntax-case stx ()
+   [(_ (([fold-targets fold-i] ...) clauses body1 body ...)
+       context-body1 context-body ...)
+    #`(let-values ([(fold-targets ...)
+                    (for/fold/derived #,stx ([fold-targets fold-i] ...) clauses body1 body ...)])
+        context-body1 context-body ...)]))
+
 (define (WorkListTask? x)
-  (or (Path? x) (Summary? x) (Call? x)))
+  (or (Path? x) (Entry? x)))
 (define-struct Path (push node) #:transparent)
+(define-struct Entry (push) #:transparent)
+;; Path : State × State
+;; Entry : State
+
 (define-struct Summary (push pop) #:transparent)
 (define-struct Call (push1 push2) #:transparent)
-;; Path : State × State
 ;; Summary : State × State
 ;; Call : State × State
 
 ;; W : [SetOf WorkListTask]
-;; Paths : [SetOf Path]
+;; Paths : [SetOf WorkListTask]
 ;; Summaries : [SetOf Summary]
 ;; Callers : [SetOf Call]
 
@@ -30,66 +41,68 @@
 ;;        Summaries
 ;;        Callers
 (define (CFA2 analysis)
-  (match-define (Analysis initial-state succ-states _ _ _ state-equal?) analysis)
+  (match-define (Analysis initial-state succ-states _ push? pop? state-equal?) analysis)
   (define (loop W Paths Summaries Callers)
     (if (set-empty? W)
         (values Paths Summaries Callers)
         (let-values (((task W) (set-get-one/rest W)))
           (match task
-            ((Path push node)
-             (let-values (((W Paths)
-                           (propagate-loop push (succ-states node) W Paths analysis)))
-               (loop W Paths Summaries Callers)))
-            ((Summary push pop)
-             (let-values
-                 (((W Paths)
-                   (for/fold ([W W]
+            ((Path push (? pop? pop))
+             (with-for/fold (([W W]
                               [Paths Paths])
-                       ([call (in-set Callers)]
-                        #:when (match call
-                                 ((Call _ push2) (state-equal? push push2))))
-                     (match call
-                       ((Call grandfather-push _)
-                        (PropagatePop grandfather-push push pop W Paths analysis))))))
+                             ([call (in-set Callers)]
+                              #:when (match call
+                                       ((Call _ push2) (state-equal? push push2))))
+                             (match call
+                               ((Call grandfather-push _)
+                                (PropagatePop grandfather-push push pop W Paths analysis))))
                (loop W Paths (set-add Summaries (Summary push pop)) Callers)))
-            ((Call push1 push2)
-             (let-values
-                 (((W Paths)
-                   (if (for/or ([sum (in-set Summaries)])
-                               (match sum
-                                 ((Summary push _) (state-equal? push push2))))
-                       (for/fold
-                           ([W W]
-                            [Paths Paths])
-                           ([sum (in-set Summaries)]
-                            #:when
-                            (match sum
-                              ((Summary push _) (state-equal? push push2))))
-                         (match sum
-                           ((Summary _ pop)
-                            (propagate-loop push1 (succ-states pop) W Paths analysis))))
-                       (Propagate push2 push2 W Paths analysis))))
-               (loop W Paths Summaries (set-add Callers (Call push1 push2)))))))))
-  (loop (set (Path initial-state initial-state))
-        (set)
+            ((Path push1 (? push? push2))
+             (define-values (W Paths)
+               (if (for/or ([sum (in-set Summaries)])
+                     (match sum
+                       ((Summary push _) (state-equal? push push2))))
+                   (for/fold
+                       ([W W]
+                        [Paths Paths])
+                       ([sum (in-set Summaries)]
+                        #:when
+                        (match sum
+                          ((Summary push _) (state-equal? push push2))))
+                     (match sum
+                       ((Summary _ pop)
+                        (PropagatePop push1 push2 pop W Paths analysis))))
+                   (PropagateEntry push2 W Paths analysis)))
+             (loop W Paths Summaries (set-add Callers (Call push1 push2))))
+            ((Path push node)
+             (define-values (W Paths)
+               (propagate-loop push (succ-states node) W Paths analysis))
+             (loop W Paths Summaries Callers))
+            ((Entry push)
+              (define-values (W Paths)
+                (propagate-loop push (succ-states push) W Paths analysis))
+              (loop W Paths Summaries Callers))))))
+  (loop (set (Entry initial-state))
+        (set (Entry initial-state))
         (set)
         (set)))
 
 
+;; Propogate* : WorkListItem W Paths Analysis -> W Paths
+(define (Propagate* element W Paths analysis)
+  (match-define (Analysis _ _ _ push? pop? state-equal?) analysis)
+  (if (set-member? Paths element)
+      (values W Paths)
+      (values (set-add W element) (set-add Paths element))))
+
 ;; Propogate : State State W Paths Analysis -> W Paths
 (define (Propagate push node W Paths analysis)
-  (match-define (Analysis _ _ _ push? pop? state-equal?) analysis)
-  (if (set-member? Paths (Path push node))
-      (values W Paths)
-      (cond [(and (push? node) (not (state-equal? push node)))
-             (values (set-add W (Call push node))
-                     Paths)]
-            [(pop? node)
-             (values (set-add W (Summary push node))
-                     (set-add Paths (Path push node)))]
-            [else
-             (values (set-add W (Path push node))
-                     (set-add Paths (Path push node)))])))
+  (Propagate* (Path push node) W Paths analysis))
+
+;; Propogate : State W Paths Analysis -> W Paths
+;; push must be a push state
+(define (PropagateEntry push W Paths analysis)
+  (Propagate* (Entry push) W Paths analysis))
 
 ;; PropogatePop : State State State W Paths Analysis -> W Paths
 (define (PropagatePop grandfather-push push pop W Paths analysis)
@@ -104,6 +117,9 @@
     (let-values (((new-W new-Paths) (Propagate push s W Paths analysis)))
       (values (set-union new-W W)
               (set-union new-Paths Paths)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Tests
 
 (define (reachability)
   (define-struct State (node env astack) #:transparent)
@@ -140,14 +156,14 @@
              (State succ-node env astack))))))
   (define (pop-succ-states push pop)
     (match-let (((State push-node _ previous-stack) push)
-                ((State pop-node env _) pop))
+                ((State pop-node env current-stack) pop))
       (match-let (((PopNode var _) pop-node))
         (for/set ([succ-node (succ-nodes pop-node)])
           (State succ-node
-                 (update-env env var previous-stack)
+                 (update-env env var current-stack)
                  previous-stack)))))
   (define (update-env env var val)
-    (hash-set env var val))
+    (hash-set env var (set-add (hash-ref env var (set)) val)))
   (Analysis (State (PushNode 'a 0) (hash) 'ε)
             succ-states
             pop-succ-states
@@ -190,7 +206,9 @@
   (test-case
    "CFA2 simple-reachability"
    (define-values (Paths Summaries Callers) (CFA2 simple-reachability))
-   (check-true (set=? (set (Path 1 8) (Path 4 4) (Path 4 5) (Path 1 9) (Path 1 2) (Path 4 6) (Path 1 10) (Path 3 3) (Path 3 7))
+   (check-true (set=? (set (Entry 1) (Entry 3) (Entry 4) (Path 1 8) (Path 3 4)
+                           (Path 4 5) (Path 1 9) (Path 1 2) (Path 1 3)
+                           (Path 4 6) (Path 1 10) (Path 3 7))
                       Paths))
    (check-true (set=? (set (Summary 4 6) (Summary 1 10) (Summary 3 7))
                       Summaries))
