@@ -12,12 +12,16 @@
   (or (Path? x) (Entry? x)))
 (define-struct Path (push node) #:transparent)
 (define-struct Entry (push) #:transparent)
-;; Path : State × State
-;; Entry : State
+;; Path : State × State × Any
+;; Entry : State × Any
+;; fi should be the result of fn-1(fn-2(...f0(⊥))) where fj is the transfer
+;; function for node j in the path 0...n. 0 is the source node and n is the
+;; Path-node or Entry-push node
 
-(define-struct Summary (push pop) #:transparent)
+
+(define-struct Summary (push pop fi) #:transparent)
 (define-struct Call (push1 push2) #:transparent)
-;; Summary : State × State
+;; Summary : State × State × FlowDatum
 ;; Call : State × State
 
 ;; W : [SetOf WorkListTask]
@@ -26,12 +30,21 @@
 ;; Callers : [SetOf Call]
 
 (define-struct Analysis
-  (initial-state succ-states pop-succ-states push? pop? state-equal?))
-;; An Analysis is a
+  (initial-state succ-states pop-succ-states push? pop? state-equal? flow-analysis))
+;; An [Analysis State] is a
 ;;   (Analysis [State -> [SetOf State]]
 ;;             [State -> Boolean]
 ;;             [State -> Boolean]
-;;             [State State -> Boolean])
+;;             [State State -> Boolean]
+;;             [FlowAnalysis State])
+(define-struct FlowAnalysis
+  (join gte transfer pop-transfer initial-flow-value))
+;; A [FlowAnalysis State] is a
+;;   (FlowAnalysis [FlowDatum FlowDatum -> FlowDatum]
+;;                 [FlowDatum FlowDatum -> Boolean]
+;;                 [State FlowInfo -> FlowDatum]
+;;                 [State State FlowInfo-> FlowDatum]
+;;                 FlowDatum)
 
 
 ;; CFA2 : State
@@ -41,90 +54,132 @@
 ;;        Summaries
 ;;        Callers
 (define (CFA2 analysis)
-  (match-define (Analysis initial-state succ-states _ push? pop? state-equal?) analysis)
-  (define (loop W Paths Summaries Callers)
+  (match-define (Analysis initial-state
+                          succ-states
+                          _
+                          push?
+                          pop?
+                          state-equal?
+                          (FlowAnalysis _ flow-gte flow-transfer _ initial-flow-value))
+                analysis)
+  (define (loop W Paths Summaries Callers FlowInfo)
+    (define (get-flow-info node)
+      (hash-ref FlowInfo node initial-flow-value))
     (if (set-empty? W)
-        (values Paths Summaries Callers)
+        (values Paths Summaries Callers FlowInfo)
         (let-values (((task W) (set-get-one/rest W)))
           (match task
             ((Path push (? pop? pop))
              (with-for/fold (([W W]
-                              [Paths Paths])
+                              [Paths Paths]
+                              [FlowInfo FlowInfo])
                              ([call (in-set Callers)]
                               #:when (match call
                                        ((Call _ push2) (state-equal? push push2))))
                              (match call
                                ((Call grandfather-push _)
-                                (PropagatePop grandfather-push push pop W Paths analysis))))
-               (loop W Paths (set-add Summaries (Summary push pop)) Callers)))
+                                (PropagatePop grandfather-push push pop W Paths FlowInfo analysis))))
+               (loop W
+                     Paths
+                     (set-add Summaries (Summary push
+                                                 pop
+                                                 (get-flow-info push)))
+                     Callers
+                     FlowInfo)))
             ((Path push1 (? push? push2))
-             (define-values (W Paths)
-               (if (for/or ([sum (in-set Summaries)])
-                     (match sum
-                       ((Summary push _) (state-equal? push push2))))
-                   (for/fold
-                       ([W W]
-                        [Paths Paths])
-                       ([sum (in-set Summaries)]
-                        #:when
-                        (match sum
-                          ((Summary push _) (state-equal? push push2))))
-                     (match sum
-                       ((Summary _ pop)
-                        (PropagatePop push1 push2 pop W Paths analysis))))
-                   (PropagateEntry push2 W Paths analysis)))
-             (loop W Paths Summaries (set-add Callers (Call push1 push2))))
+             (let-values
+                 (((W Paths FlowInfo)
+                   (cond [(for/or ([sum (in-set Summaries)])
+                                  (match sum
+                                    ((Summary push _ _) (state-equal? push push2))))
+                          (for/fold
+                              ([W W]
+                               [Paths Paths]
+                               [FlowInfo FlowInfo])
+                              ([sum (in-set Summaries)]
+                               #:when
+                               (match sum
+                                 ((Summary push _ _) (state-equal? push push2))))
+                            (match sum
+                              ((Summary _ pop fi)
+                               (cond [(flow-gte fi (get-flow-info push2))
+                                      (PropagatePop push1 push2 pop W Paths FlowInfo analysis)]
+                                     [else (PropagateEntry push2 W Paths FlowInfo)]))))]
+                         [else (PropagateEntry push2 W Paths FlowInfo)])))
+               (loop W Paths Summaries (set-add Callers (Call push1 push2)) FlowInfo)))
             ((Path push node)
-             (define-values (W Paths)
-               (propagate-loop push (succ-states node) W Paths analysis))
-             (loop W Paths Summaries Callers))
+             (let-values (((W Paths FlowInfo)
+                           (propagate-loop push (succ-states node) (flow-transfer node (get-flow-info node))
+                                           W Paths FlowInfo analysis)))
+               (loop W Paths Summaries Callers FlowInfo)))
             ((Entry push)
-              (define-values (W Paths)
-                (propagate-loop push (succ-states push) W Paths analysis))
-              (loop W Paths Summaries Callers))))))
+             (let-values (((W Paths FlowInfo)
+                           (propagate-loop push (succ-states push) (flow-transfer push (get-flow-info push))
+                                           W Paths FlowInfo analysis)))
+               (loop W Paths Summaries Callers FlowInfo)))))))
   (loop (set (Entry initial-state))
         (set (Entry initial-state))
         (set)
-        (set)))
+        (set)
+        (hash initial-state initial-flow-value)))
 
 
-;; Propogate* : WorkListItem W Paths Analysis -> W Paths
-(define (Propagate* element W Paths analysis)
-  (match-define (Analysis _ _ _ push? pop? state-equal?) analysis)
-  (if (set-member? Paths element)
-      (values W Paths)
-      (values (set-add W element) (set-add Paths element))))
+;; Propagate : State State Any W Paths FlowInfo Analysis -> W Paths FlowInfo
+(define (Propagate push node fi W Paths FlowInfo analysis)
+  (match-define (Analysis _ _ _ _ _ _ (FlowAnalysis join _ _ _ initial-flow-value)) analysis)
+  (define (get-flow-info node)
+    (hash-ref FlowInfo node initial-flow-value))
+  (if (not (set-member? Paths (Path push node)))
+      (UpdatePathsWAndFI push node fi W Paths FlowInfo analysis)
+      (if (not (equal? (join (get-flow-info node) fi)
+                       (get-flow-info node)))
+          (UpdatePathsWAndFI push node (join (get-flow-info node) fi)
+                             W Paths FlowInfo analysis)
+          (values W Paths FlowInfo))))
 
-;; Propogate : State State W Paths Analysis -> W Paths
-(define (Propagate push node W Paths analysis)
-  (Propagate* (Path push node) W Paths analysis))
+(define (UpdatePathsWAndFI push node fi W Paths FlowInfo analysis)
+  (match-define (Analysis _ _ _ _ _ _ (FlowAnalysis join _ _ _ initial-flow-value)) analysis)
+  (values (set-add W (Path push node))
+          (set-add Paths (Path push node))
+          (hash-set FlowInfo node (join (hash-ref FlowInfo node initial-flow-value) fi))))
 
-;; Propogate : State W Paths Analysis -> W Paths
+;; PropagateEntry : State W Paths FlowInfo -> W Paths FlowInfo
 ;; push must be a push state
-(define (PropagateEntry push W Paths analysis)
-  (Propagate* (Entry push) W Paths analysis))
+(define (PropagateEntry push W Paths FlowInfo)
+  (if (set-member? Paths (Entry push))
+      (values W Paths FlowInfo)
+      (values (set-add W (Entry push))
+              (set-add Paths (Entry push))
+              FlowInfo)))
 
-;; PropogatePop : State State State W Paths Analysis -> W Paths
-(define (PropagatePop grandfather-push push pop W Paths analysis)
-  (match-define (Analysis _ _ pop-succ-states _ _ _) analysis)
-  (propagate-loop grandfather-push (pop-succ-states push pop) W Paths analysis))
+;; PropagatePop : State State State W Paths FlowInfo Analysis -> W Paths FlowInfo
+(define (PropagatePop grandfather-push push pop W Paths FlowInfo analysis)
+  (match-define (Analysis _ _ pop-succ-states _ _ _ (FlowAnalysis _ _ _ pop-transfer _)) analysis)
+  (propagate-loop grandfather-push
+                  (pop-succ-states push pop)
+                  (pop-transfer pop (hash-ref FlowInfo pop)
+                                grandfather-push (hash-ref FlowInfo grandfather-push))
+                  W Paths FlowInfo analysis))
 
-;; propagate-loop : State [SetOf State] W Paths Analysis -> W Paths
-(define (propagate-loop push succs W Paths analysis)
+;; propagate-loop : State [SetOf State] Any W Paths FlowInfo Analysis -> W Paths FlowInfo
+(define (propagate-loop push succs fi W Paths FlowInfo analysis)
   (for/fold ([W W]
-             [Paths Paths])
+             [Paths Paths]
+             [FlowInfo FlowInfo])
             ([s (in-set succs)])
-    (let-values (((new-W new-Paths) (Propagate push s W Paths analysis)))
-      (values (set-union new-W W)
-              (set-union new-Paths Paths)))))
+    (let-values (((new-W new-Paths new-FlowInfo) (Propagate push s fi W Paths FlowInfo analysis)))
+      (values new-W
+              new-Paths
+              new-FlowInfo))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tests
 
-(define (reachability)
+(define (reachability/min-headroom)
   (define-struct State (node env astack) #:transparent)
   (define-struct PushNode (value id) #:transparent)
   (define-struct PopNode (var id) #:transparent)
+  (define-struct StackEnsure (hdrm id) #:transparent)
   (define-struct Noop (id) #:transparent)
 
 
@@ -136,11 +191,11 @@
                    (PopNode? node))))
   (define state-equal? equal?)
   (define (succ-nodes node)
-    (hash-ref (hash (PushNode 'a 0) (set (Noop 1))
-                    (Noop 1) (set (PushNode 'b 2))
+    (hash-ref (hash (PushNode 'a 0) (set (StackEnsure 5 1))
+                    (StackEnsure 5 1) (set (PushNode 'b 2))
                     (PushNode 'b 2) (set (PushNode 'c 3))
                     (PushNode 'c 3) (set (Noop 4))
-                    (Noop 4) (set (PopNode 'var1 5) (PushNode 'b 2))
+                    (Noop 4) (set (PopNode 'var1 5) (StackEnsure 5 1))
                     (PopNode 'var1 5) (set (PopNode 'var2 6))
                     (PopNode 'var2 6) (set (Noop 7))
                     (Noop 7) (set (Noop 8))
@@ -164,55 +219,76 @@
                  previous-stack)))))
   (define (update-env env var val)
     (hash-set env var (set-add (hash-ref env var (set)) val)))
+
+  (define flow-join min)
+  (define flow->= <=)
+  (define (flow-transfer state fi)
+    (printf "state: ~a, fi: ~a\n" state fi)
+    (match-let (((State node _ _) state))
+      (match node
+        ((PushNode _ _)
+         (cond [(= fi +inf.0) 0]
+               [else (max (sub1 fi) 0)]))
+        ((PopNode _ _) (add1 fi))
+        ((StackEnsure hdrm _) (max hdrm fi))
+        ((Noop _) fi))))
+  (define (flow-pop-transfer pop pop-fi grandfather-push gfather-fi)
+    (add1 pop-fi))
+
   (Analysis (State (PushNode 'a 0) (hash) 'ε)
             succ-states
             pop-succ-states
             push?
             pop?
-            state-equal?))
+            state-equal?
+            (FlowAnalysis flow-join
+                          flow->=
+                          flow-transfer
+                          flow-pop-transfer
+                          +inf.0)))
 
-(CFA2 (reachability))
+(CFA2 (reachability/min-headroom))
 
-(define simple-reachability
-  (let* ([push? (lambda (s)
-                  (set-member? (set 1 3 4) s))]
-         [pop? (lambda (s)
-                 (set-member? (set 6 7 10) s))]
-         [state-equal? (lambda (s1 s2)
-                         (= s1 s2))]
-         [succ-states (lambda (s)
-                        (hash-ref (hasheq 1 (set 2)
-                                          2 (set 3)
-                                          3 (set 4)
-                                          4 (set 5)
-                                          5 (set 6)
-                                          6 (set 7)
-                                          7 (set 8)
-                                          8 (set 9)
-                                          9 (set 10)
-                                          10 (set))
-                                  s))]
-         [pop-succ-states (lambda (push pop)
-                            (succ-states pop))])
-    (Analysis 1 succ-states pop-succ-states push? pop? state-equal?)))
+;; (define simple-reachability
+;;   (let* ([push? (lambda (s)
+;;                   (set-member? (set 1 3 4) s))]
+;;          [pop? (lambda (s)
+;;                  (set-member? (set 6 7 10) s))]
+;;          [state-equal? (lambda (s1 s2)
+;;                          (= s1 s2))]
+;;          [succ-states (lambda (s)
+;;                         (hash-ref (hasheq 1 (set 2)
+;;                                           2 (set 3)
+;;                                           3 (set 4)
+;;                                           4 (set 5)
+;;                                           5 (set 6)
+;;                                           6 (set 7)
+;;                                           7 (set 8)
+;;                                           8 (set 9)
+;;                                           9 (set 10)
+;;                                           10 (set))
+;;                                   s))]
+;;          [pop-succ-states (lambda (push pop)
+;;                             (succ-states pop))])
+;;     (Analysis 1 succ-states pop-succ-states push? pop? state-equal?)))
 
-(CFA2 simple-reachability)
+;; (CFA2 simple-reachability)
 
 
-(require rackunit
-         rackunit/text-ui)
+;; (require rackunit
+;;          rackunit/text-ui)
 
-(define-test-suite cfa2-tests
-  (test-case
-   "CFA2 simple-reachability"
-   (define-values (Paths Summaries Callers) (CFA2 simple-reachability))
-   (check-true (set=? (set (Entry 1) (Entry 3) (Entry 4) (Path 1 8) (Path 3 4)
-                           (Path 4 5) (Path 1 9) (Path 1 2) (Path 1 3)
-                           (Path 4 6) (Path 1 10) (Path 3 7))
-                      Paths))
-   (check-true (set=? (set (Summary 4 6) (Summary 1 10) (Summary 3 7))
-                      Summaries))
-   (check-true (set=? (set (Call 3 4) (Call 1 3))
-                      Callers))))
+;; (define-test-suite cfa2-tests
+;;   (test-case
+;;    "CFA2 simple-reachability"
+;;    (define-values (Paths Summaries Callers) (CFA2 simple-reachability))
+;;    (check-true (set=? (set (Entry 1) (Entry 3) (Entry 4) (Path 1 8) (Path 3 4)
+;;                            (Path 4 5) (Path 1 9) (Path 1 2) (Path 1 3)
+;;                            (Path 4 6) (Path 1 10) (Path 3 7))
+;;                       Paths))
+;;    (check-true (set=? (set (Summary 4 6) (Summary 1 10) (Summary 3 7))
+;;                       Summaries))
+;;    (check-true (set=? (set (Call 3 4) (Call 1 3))
+;;                       Callers))))
 
-(run-tests cfa2-tests)
+;; (run-tests cfa2-tests)
