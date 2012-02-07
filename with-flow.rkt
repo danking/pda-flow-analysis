@@ -214,10 +214,8 @@
       (match-let (((PopNode var _) pop-node))
         (for/set ([succ-node (succ-nodes pop-node)])
           (State succ-node
-                 (update-env env var current-stack)
+                 (hash-set env var current-stack)
                  previous-stack)))))
-  (define (update-env env var val)
-    (hash-set env var (set-add (hash-ref env var (set)) val)))
 
   (define flow-join min)
   (define flow->= <=)
