@@ -47,8 +47,7 @@
 ;;                 FlowDatum)
 
 
-;; CFA2 : State
-;;        Analysis
+;; CFA2 : Analysis
 ;;        ->
 ;;        Paths
 ;;        Summaries
