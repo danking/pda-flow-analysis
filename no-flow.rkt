@@ -58,30 +58,31 @@
                                 (PropagatePop grandfather-push push pop W Paths analysis))))
                (loop W Paths (set-add Summaries (Summary push pop)) Callers)))
             ((Path push1 (? push? push2))
-             (define-values (W Paths)
-               (if (for/or ([sum (in-set Summaries)])
-                     (match sum
-                       ((Summary push _) (state-equal? push push2))))
-                   (for/fold
-                       ([W W]
-                        [Paths Paths])
-                       ([sum (in-set Summaries)]
-                        #:when
-                        (match sum
-                          ((Summary push _) (state-equal? push push2))))
-                     (match sum
-                       ((Summary _ pop)
-                        (PropagatePop push1 push2 pop W Paths analysis))))
-                   (PropagateEntry push2 W Paths analysis)))
-             (loop W Paths Summaries (set-add Callers (Call push1 push2))))
+             (let-values
+                 (((W Paths)
+                   (if (for/or ([sum (in-set Summaries)])
+                               (match sum
+                                 ((Summary push _) (state-equal? push push2))))
+                       (for/fold
+                           ([W W]
+                            [Paths Paths])
+                           ([sum (in-set Summaries)]
+                            #:when
+                            (match sum
+                              ((Summary push _) (state-equal? push push2))))
+                         (match sum
+                           ((Summary _ pop)
+                            (PropagatePop push1 push2 pop W Paths analysis))))
+                       (PropagateEntry push2 W Paths analysis))))
+               (loop W Paths Summaries (set-add Callers (Call push1 push2)))))
             ((Path push node)
-             (define-values (W Paths)
-               (propagate-loop push (succ-states node) W Paths analysis))
-             (loop W Paths Summaries Callers))
+             (let-values (((W Paths)
+                           (propagate-loop push (succ-states node) W Paths analysis)))
+               (loop W Paths Summaries Callers)))
             ((Entry push)
-              (define-values (W Paths)
-                (propagate-loop push (succ-states push) W Paths analysis))
-              (loop W Paths Summaries Callers))))))
+             (let-values (((W Paths)
+                           (propagate-loop push (succ-states push) W Paths analysis)))
+               (loop W Paths Summaries Callers)))))))
   (loop (set (Entry initial-state))
         (set (Entry initial-state))
         (set)
