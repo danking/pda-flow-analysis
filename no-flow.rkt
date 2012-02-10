@@ -1,32 +1,21 @@
 #lang racket
 
-(define-syntax (with-for/fold stx)
- (syntax-case stx ()
-   [(_ (([fold-targets fold-i] ...) clauses body1 body ...)
-       context-body1 context-body ...)
-    #`(let-values ([(fold-targets ...)
-                    (for/fold/derived #,stx ([fold-targets fold-i] ...) clauses body1 body ...)])
-        context-body1 context-body ...)]))
+(define-syntax-rule (apply-to-values p generator)
+  (call-with-values (lambda () generator) p))
 
 (define (WorkListTask? x)
-  (or (Path? x) (Entry? x)))
-(define-struct Path (push node) #:transparent)
-(define-struct Entry (push) #:transparent)
-;; Path : State × State
+  (or (BP? x) (Open? x)))
+(define-struct BP (open node) #:transparent)
+(define-struct Open (open) #:transparent)
+;; BP : State × State
 ;; Entry : State
 
-(define-struct Summary (push pop) #:transparent)
-(define-struct Call (push1 push2) #:transparent)
-;; Summary : State × State
-;; Call : State × State
 
 ;; W : [SetOf WorkListTask]
 ;; Paths : [SetOf WorkListTask]
-;; Summaries : [SetOf Summary]
-;; Callers : [SetOf Call]
 
 (define-struct Analysis
-  (initial-state succ-states pop-succ-states push? pop? state-equal?))
+  (initial-state NextStates NextStatesAcross open? close? state-equal?))
 ;; An Analysis is a
 ;;   (Analysis [State -> [SetOf State]]
 ;;             [State -> Boolean]
@@ -34,90 +23,87 @@
 ;;             [State State -> Boolean])
 
 
-;; CFA2 : State
-;;        Analysis
+;; CFA2 : Analysis
 ;;        ->
 ;;        Paths
-;;        Summaries
-;;        Callers
 (define (CFA2 analysis)
-  (match-define (Analysis initial-state succ-states _ push? pop? state-equal?) analysis)
-  (define (loop W Paths Summaries Callers)
+  (match-define (Analysis initial-state NextStates _ open? close? state-equal?) analysis)
+  (define (loop W Paths)
     (if (set-empty? W)
-        (values Paths Summaries Callers)
+        Paths
         (let-values (((task W) (set-get-one/rest W)))
-          (match task
-            ((Path push (? pop? pop))
-             (with-for/fold (([W W]
-                              [Paths Paths])
-                             ([call (in-set Callers)]
-                              #:when (match call
-                                       ((Call _ push2) (state-equal? push push2))))
-                             (match call
-                               ((Call grandfather-push _)
-                                (PropagatePop grandfather-push push pop W Paths analysis))))
-               (loop W Paths (set-add Summaries (Summary push pop)) Callers)))
-            ((Path push1 (? push? push2))
-             (let-values
-                 (((W Paths)
-                   (if (for/or ([sum (in-set Summaries)])
-                               (match sum
-                                 ((Summary push _) (state-equal? push push2))))
-                       (for/fold
-                           ([W W]
-                            [Paths Paths])
-                           ([sum (in-set Summaries)]
-                            #:when
-                            (match sum
-                              ((Summary push _) (state-equal? push push2))))
-                         (match sum
-                           ((Summary _ pop)
-                            (PropagatePop push1 push2 pop W Paths analysis))))
-                       (PropagateEntry push2 W Paths analysis))))
-               (loop W Paths Summaries (set-add Callers (Call push1 push2)))))
-            ((Path push node)
-             (let-values (((W Paths)
-                           (propagate-loop push (succ-states node) W Paths analysis)))
-               (loop W Paths Summaries Callers)))
-            ((Entry push)
-             (let-values (((W Paths)
-                           (propagate-loop push (succ-states push) W Paths analysis)))
-               (loop W Paths Summaries Callers)))))))
-  (loop (set (Entry initial-state))
-        (set (Entry initial-state))
-        (set)
-        (set)))
+          (apply-to-values
+           loop
+           (match task
+             ((BP open (? close? close))
+              (for/fold ([W W]
+                         [Paths Paths])
+                        ([call (in-set Paths)]
+                         #:when (match call
+                                  ((BP gf open~)
+                                   (and (open? gf)
+                                        (state-equal? open open~)))
+                                  ((Open _) #f)))
+                (match call
+                  ((BP grandfather-open _)
+                   (PropagateAcross grandfather-open open close W Paths analysis)))))
+             ((BP open (? open? open2))
+              (if (for/or ([sum (in-set Paths)])
+                          (match sum
+                            ((BP open~ close~)
+                             (and (state-equal? open2 open~)
+                                  (close? close~)))
+                            ((Open _) #f)))
+                  (for/fold
+                      ([W W]
+                       [Paths Paths])
+                      ([sum (in-set Paths)]
+                       #:when
+                       (match sum
+                         ((BP open~ close~)
+                          (and (state-equal? open2 open~)
+                               (close? close~)))
+                         ((Open _) #f)))
+                    (match sum
+                      ((BP open~ close~)
+                       (PropagateAcross open open2 close~ W Paths analysis))))
+                  (PropagateOpen open2 W Paths)))
+             ((BP open node)
+              (propagate-loop open (NextStates node) W Paths))
+             ((Open open)
+              (propagate-loop open (NextStates open) W Paths)))))))
+ (loop (set (Open initial-state))
+       (set (Open initial-state))))
 
 
-;; Propogate* : WorkListItem W Paths Analysis -> W Paths
-(define (Propagate* element W Paths analysis)
-  (match-define (Analysis _ _ _ push? pop? state-equal?) analysis)
+;; Propogate* : WorkListItem W Paths -> W Paths
+(define (Propagate* element W Paths)
   (if (set-member? Paths element)
       (values W Paths)
       (values (set-add W element) (set-add Paths element))))
 
-;; Propogate : State State W Paths Analysis -> W Paths
-(define (Propagate push node W Paths analysis)
-  (Propagate* (Path push node) W Paths analysis))
+;; Propogate : State State W Paths -> W Paths
+(define (Propagate open node W Paths)
+  (Propagate* (BP open node) W Paths))
 
-;; Propogate : State W Paths Analysis -> W Paths
-;; push must be a push state
-(define (PropagateEntry push W Paths analysis)
-  (Propagate* (Entry push) W Paths analysis))
+;; PropogateOpen : State W Paths Analysis -> W Paths
+;; push must be an open state
+(define (PropagateOpen open W Paths)
+  (Propagate* (Open open) W Paths))
 
-;; PropogatePop : State State State W Paths Analysis -> W Paths
-(define (PropagatePop grandfather-push push pop W Paths analysis)
-  (match-define (Analysis _ _ pop-succ-states _ _ _) analysis)
-  (propagate-loop grandfather-push (pop-succ-states push pop) W Paths analysis))
+;; PropogateAcross : State State State W Paths Analysis -> W Paths
+(define (PropagateAcross grandfather-open open close W Paths analysis)
+  (match-define (Analysis _ _ NextStatesAcross _ _ _) analysis)
+  (propagate-loop grandfather-open (NextStatesAcross open close) W Paths))
 
-;; propagate-loop : State [SetOf State] W Paths Analysis -> W Paths
-(define (propagate-loop push succs W Paths analysis)
+;; propagate-loop : State [SetOf State] W Paths -> W Paths
+(define (propagate-loop push succs W Paths)
   (for/fold ([W W]
              [Paths Paths])
             ([s (in-set succs)])
-    (let-values (((new-W new-Paths) (Propagate push s W Paths analysis)))
-      (values (set-union new-W W)
-              (set-union new-Paths Paths)))))
+    (let-values (((W~ Paths~) (Propagate push s W Paths)))
+      (values (set-union W W~)
+              (set-union Paths Paths~)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tests
@@ -206,14 +192,10 @@
 (define-test-suite cfa2-tests
   (test-case
    "CFA2 simple-reachability"
-   (define-values (Paths Summaries Callers) (CFA2 simple-reachability))
-   (check-true (set=? (set (Entry 1) (Entry 3) (Entry 4) (Path 1 8) (Path 3 4)
-                           (Path 4 5) (Path 1 9) (Path 1 2) (Path 1 3)
-                           (Path 4 6) (Path 1 10) (Path 3 7))
-                      Paths))
-   (check-true (set=? (set (Summary 4 6) (Summary 1 10) (Summary 3 7))
-                      Summaries))
-   (check-true (set=? (set (Call 3 4) (Call 1 3))
-                      Callers))))
+   (define Paths (CFA2 simple-reachability))
+   (check-true (set=? (set (Open 1) (Open 3) (Open 4) (BP 1 8) (BP 3 4)
+                           (BP 4 5) (BP 1 9) (BP 1 2) (BP 1 3)
+                           (BP 4 6) (BP 1 10) (BP 3 7))
+                      Paths))))
 
 (run-tests cfa2-tests)
