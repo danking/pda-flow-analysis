@@ -75,7 +75,8 @@
                     (match sum
                       ((BP open~ close~)
                        (PropagateAcross open1 open2 close~ W Paths FlowInfo analysis))))
-                  (PropagateOpen open2 W Paths FlowInfo)))
+                  (propagate-loop open2 (NextStates open2) (FlowTransfer node)
+                                  W Paths FlowInfo analysis)))
              ((BP open node)
               (propagate-loop open (NextStates node) (FlowTransfer node)
                               W Paths FlowInfo analysis)))))))
