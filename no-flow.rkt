@@ -11,45 +11,61 @@
 ;; Paths : [SetOf BP]
 
 (define-struct Analysis
-  (initial-state NextStates NextStatesAcross open? close? state-equal?))
+  (initial-state NextStates NextStatesAcross open? close? state-equal? flow-analysis))
 ;; An Analysis is a
 ;;   (Analysis [State -> [SetOf State]]
 ;;             [State -> Boolean]
 ;;             [State -> Boolean]
 ;;             [State State -> Boolean])
+;;             [FlowAnalysis State])
 
+(define-struct FlowAnalysis
+  (join gte FlowTransfer FlowTransferAcross initial-flow-value default-flow-value))
+
+;; the states in the BPs of  the Worklist and Paths 
+(define-struct StateWithFlow (state fi))
 
 ;; CFA2 : Analysis
 ;;        ->
 ;;        Paths
 (define (CFA2 analysis)
-  (match-define (Analysis initial-state NextStates _ open? close? state-equal?) analysis)
-  (define (loop W Paths)
+  (match-define (Analysis initial-state NextStates _ open? close? state-equal?
+                          (FlowAnalysis _ gte FlowTransfer _ initial-flow-value default-flow-value))
+                analysis)
+
+  (define (loop W Paths FlowInfo)
+    (define (get-flow-info s)
+      (hash-ref FlowInfo s default-flow-value))
+
     (if (set-empty? W)
-        Paths
+        (values Paths FlowInfo)
         (let-values (((task W) (set-get-one/rest W)))
           (apply-to-values
            loop
            (match task
              ((BP open (? close? close))
               (for/fold ([W W]
-                         [Paths Paths])
+                         [Paths Paths]
+                         [FlowInfo FlowInfo])
                         ([call (in-set Paths)]
                          #:when (match call
                                   ((BP gf open~)
                                    (state-equal? open open~))))
                 (match call
                   ((BP grandfather-open _)
-                   (PropagateAcross grandfather-open open close W Paths analysis)))))
+                   (PropagateAcross grandfather-open open close W Paths FlowInfo analysis)))))
              ((BP open1 (? open? open2))
               (if (for/or ([sum (in-set Paths)])
                           (match sum
                             ((BP open~ close~)
                              (and (state-equal? open2 open~)
-                                  (close? close~)))))
+                                  (close? close~)
+                                  (gte (flow-value-old (get-flow-info open2))
+                                       (flow-value-new (get-flow-info open2)))))))
                   (for/fold
                       ([W W]
-                       [Paths Paths])
+                       [Paths Paths]
+                       [FlowInfo FlowInfo])
                       ([sum (in-set Paths)]
                        #:when
                        (match sum
@@ -58,26 +74,39 @@
                                (close? close~)))))
                     (match sum
                       ((BP open~ close~)
-                       (PropagateAcross open1 open2 close~ W Paths analysis))))
-                  (propagate-loop open2 (NextStates open) W Paths)))
+                       (PropagateAcross open1 open2 close~ W Paths FlowInfo analysis))))
+                  (PropagateOpen open2 W Paths FlowInfo)))
              ((BP open node)
-              (propagate-loop open (NextStates node) W Paths)))))))
-  (apply-to-values loop
+              (propagate-loop open (NextStates node) (FlowTransfer node)
+                              W Paths FlowInfo analysis)))))))
+ (apply-to-values loop
                    (propagate-loop initial-state
                                    (NextStates initial-state)
                                    (set)
                                    (set))))
 
 
-;; Propogate : OpenState State W Paths -> W Paths
-(define (Propagate open node W Paths)
+;; Propogate : OpenState State FI W Paths FlowInfo analysis -> W Paths
+(define (Propagate open node fi W Paths FlowInfo analysis)
+  (match-define (Analysis _ _ _ open? _ _
+                          (FlowAnalysis join _ _ _ _ _)) analysis)
   (if (set-member? Paths (BP open node))
       (values W Paths)
-      (values (set-add W (BP open node)) (set-add Paths (BP open node)))))
+      (values (set-add W (BP open node))
+              (set-add Paths (BP open node))
+              (hash-set FlowInfo node
+                        (if (open? node)
+                            (flow-value (join fi
+                                              (flow-value-new
+                                               (hash-ref FlowInfo node)))
+                                        (flow-value-new
+                                         (hash-ref FlowInfo node)))
+                            (join fi (hash-ref FlowInfo node)))))))
 
 ;; PropogateAcross : State State State W Paths Analysis -> W Paths
 (define (PropagateAcross grandfather-open open close W Paths analysis)
-  (match-define (Analysis _ _ NextStatesAcross _ _ _) analysis)
+  (match-define (Analysis _ _ NextStatesAcross _ _ _
+                          (FlowAnalysis join _ _ _ _ _)) analysis)
   (propagate-loop grandfather-open (NextStatesAcross open close) W Paths))
 
 ;; propagate-loop : State [SetOf State] W Paths -> W Paths
