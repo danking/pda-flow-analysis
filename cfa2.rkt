@@ -5,6 +5,13 @@
   (let ((e (for/first ((e (in-set s))) e)))
     (values e (set-remove s e))))
 
+(define-syntax my-for/first
+  (syntax-rules ()
+    ((for/first ((id clause) when-clauses ...)
+       body)
+     (let ((id (for/first ((id clause) when-clauses ...) id)))
+       body))))
+
 (define-syntax-rule (apply-to-values p generator)
   (call-with-values (lambda () generator) p))
 
@@ -97,7 +104,11 @@
           ((BP open~ node~)
            (and (state-similar? open open~)
                 (state-similar? node node~)))))
-      (for/first ([bp (in-set Paths)])
+      (my-for/first ([bp (in-set Paths)]
+                     #:when (match bp
+                              ((BP open~ node~)
+                               (and (state-similar? open open~)
+                                    (state-similar? node node~)))))
         (match bp
           ((BP open~ node~)
            (if (and (gte open~ open)
