@@ -22,7 +22,7 @@
 (define-struct FlowAnalysis
   (join gte FlowTransfer FlowTransferAcross initial-flow-value default-flow-value))
 
-;; the states in the BPs of  the Worklist and Paths 
+;; the states in the BPs of the Worklist and Paths
 (define-struct StateWithFlow (state fi))
 
 ;; CFA2 : Analysis
