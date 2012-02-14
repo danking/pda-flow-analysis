@@ -3,16 +3,12 @@
 (define-syntax-rule (apply-to-values p generator)
   (call-with-values (lambda () generator) p))
 
-(define (WorkListTask? x)
-  (or (BP? x) (Open? x)))
 (define-struct BP (open node) #:transparent)
-(define-struct Open (open) #:transparent)
-;; BP : State × State
-;; Entry : State
+;; BP : OpenState × State
 
 
-;; W : [SetOf WorkListTask]
-;; Paths : [SetOf WorkListTask]
+;; W : [SetOf BP]
+;; Paths : [SetOf BP]
 
 (define-struct Analysis
   (initial-state NextStates NextStatesAcross open? close? state-equal?))
@@ -41,19 +37,16 @@
                         ([call (in-set Paths)]
                          #:when (match call
                                   ((BP gf open~)
-                                   (and (open? gf)
-                                        (state-equal? open open~)))
-                                  ((Open _) #f)))
+                                   (state-equal? open open~))))
                 (match call
                   ((BP grandfather-open _)
                    (PropagateAcross grandfather-open open close W Paths analysis)))))
-             ((BP open (? open? open2))
+             ((BP open1 (? open? open2))
               (if (for/or ([sum (in-set Paths)])
                           (match sum
                             ((BP open~ close~)
                              (and (state-equal? open2 open~)
-                                  (close? close~)))
-                            ((Open _) #f)))
+                                  (close? close~)))))
                   (for/fold
                       ([W W]
                        [Paths Paths])
@@ -62,34 +55,25 @@
                        (match sum
                          ((BP open~ close~)
                           (and (state-equal? open2 open~)
-                               (close? close~)))
-                         ((Open _) #f)))
+                               (close? close~)))))
                     (match sum
                       ((BP open~ close~)
-                       (PropagateAcross open open2 close~ W Paths analysis))))
-                  (PropagateOpen open2 W Paths)))
+                       (PropagateAcross open1 open2 close~ W Paths analysis))))
+                  (propagate-loop open2 (NextStates open) W Paths)))
              ((BP open node)
-              (propagate-loop open (NextStates node) W Paths))
-             ((Open open)
-              (propagate-loop open (NextStates open) W Paths)))))))
- (loop (set (Open initial-state))
-       (set (Open initial-state))))
+              (propagate-loop open (NextStates node) W Paths)))))))
+  (apply-to-values loop
+                   (propagate-loop initial-state
+                                   (NextStates initial-state)
+                                   (set)
+                                   (set))))
 
 
-;; Propogate* : WorkListItem W Paths -> W Paths
-(define (Propagate* element W Paths)
-  (if (set-member? Paths element)
-      (values W Paths)
-      (values (set-add W element) (set-add Paths element))))
-
-;; Propogate : State State W Paths -> W Paths
+;; Propogate : OpenState State W Paths -> W Paths
 (define (Propagate open node W Paths)
-  (Propagate* (BP open node) W Paths))
-
-;; PropogateOpen : State W Paths Analysis -> W Paths
-;; push must be an open state
-(define (PropagateOpen open W Paths)
-  (Propagate* (Open open) W Paths))
+  (if (set-member? Paths (BP open node))
+      (values W Paths)
+      (values (set-add W (BP open node)) (set-add Paths (BP open node)))))
 
 ;; PropogateAcross : State State State W Paths Analysis -> W Paths
 (define (PropagateAcross grandfather-open open close W Paths analysis)
