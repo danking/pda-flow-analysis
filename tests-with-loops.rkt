@@ -10,11 +10,33 @@
 (define-struct (pop-node node) (reg) #:transparent)
 (define-struct (noop-node node) () #:transparent)
 
+(define (push? flow-state)
+  (push-node? (abstract-state-node (flow-state-astate flow-state))))
+(define (pop? flow-state)
+  (pop-node? (abstract-state-node (flow-state-astate flow-state))))
+
+(define state-similar? (match-lambda*
+                         [(list (flow-state s1 _)
+                                (flow-state s2 _))
+                          (equal? s1 s2)]))
+(define state-equal? equal?)
+
+
+(define (uid->node uid)
+  (hash-ref (hasheq 1 (push-node 1 'a)
+                    2 (noop-node 2)
+                    3 (push-node 3 'b)
+                    4 (push-node 4 'c)
+                    5 (noop-node 5)
+                    6 (pop-node 6 'r1)
+                    7 (pop-node 7 'r2)
+                    8 (noop-node 8)
+                    9 (noop-node 9)
+                    10 (pop-node 10 'r3))
+            uid))
+
 (define (simple-min-headroom)
-  (define (push? flow-state)
-    (push-node? (abstract-state-node (flow-state-astate flow-state))))
-  (define (pop? flow-state)
-    (pop-node? (abstract-state-node (flow-state-astate flow-state))))
+
   (define join
     (match-lambda*
       [(list (flow-state s1 f1) (flow-state s1 f2))
@@ -22,26 +44,9 @@
   (define gte
     (match-lambda*
       [(list (flow-state s1 f1) (flow-state s1 f2))
-       (<= f1 f2)]))
+       (<= f1 f2)]
+      [(list (flow-state _ _) (flow-state _ _)) #f]))
 
-  (define state-similar? (match-lambda*
-                           [(list (flow-state s1 _)
-                                  (flow-state s2 _))
-                            (equal? s1 s2)]))
-  (define state-equal? equal?)
-
-  (define (uid->node uid)
-    (hash-ref (hasheq 1 (push-node 1 'a)
-                      2 (noop-node 2)
-                      3 (push-node 3 'b)
-                      4 (push-node 4 'c)
-                      5 (noop-node 5)
-                      6 (pop-node 6 'r1)
-                      7 (pop-node 7 'r2)
-                      8 (noop-node 8)
-                      9 (noop-node 9)
-                      10 (pop-node 10 'r3))
-              uid))
   (define (succ-node node)
     (for/set ([uid (in-set
                     (hash-ref (hasheq 1 (set 2)
@@ -100,24 +105,56 @@
                 join gte state-similar?
                 succ-states/flow pop-succ-states/flow))
 
-(CFA2 (simple-min-headroom))
-
 (require rackunit
-         rackunit/text-ui)
-#;
+         rackunit/text-ui
+         "utilities.rkt")
+
+
 (define-test-suite cfa2-tests
   (test-case
    "CFA2 simple-min-headroom"
    (define Paths (CFA2 (simple-min-headroom)))
-   (check-true (set=? (set (BP (state 1 3) (state 2 2))
-                           (BP (state 1 3) (state 3 2))
-                           (BP (state 3 2) (state 4 1))
-                           (BP (state 4 1) (state 5 0))
-                           (BP (state 4 1) (state 6 0))
-                           (BP (state 3 2) (state 7 1))
-                           (BP (state 1 3) (state 8 2))
-                           (BP (state 1 3) (state 9 2))
-                           (BP (state 1 3) (state 10 2)))
-                      Paths))))
-#;
+   (check-equal?  (bpset->fv-hash Paths
+                                  (lambda (fstate)
+                                    (match fstate
+                                      ((flow-state astate fv) (values astate fv))))
+                                  min)
+                  (hash
+                   (abstract-state (push-node 1 'a) '#hash() 'ε)
+                   5.0
+                   (abstract-state (noop-node 2) '#hash() 'c)
+                   0.0
+                   (abstract-state (noop-node 2) '#hash() 'a)
+                   4.0
+                   (abstract-state (push-node 3 'b) '#hash() 'c)
+                   0.0
+                   (abstract-state (push-node 3 'b) '#hash() 'a)
+                   4.0
+                   (abstract-state (push-node 4 'c) '#hash() 'b)
+                   0.0
+                   (abstract-state (noop-node 5) '#hash() 'c)
+                   0.0
+                   (abstract-state (pop-node 6 'r1) '#hash() 'c)
+                   0.0
+                   (abstract-state (pop-node 7 'r2) '#hash((r1 . c)) 'b)
+                   1.0
+                   (abstract-state (noop-node 8) '#hash((r1 . c) (r2 . b)) 'a)
+                   4.0
+                   (abstract-state (noop-node 8) '#hash((r1 . c) (r2 . b)) 'c)
+                   2.0
+                   (abstract-state (noop-node 9) '#hash((r1 . c) (r2 . b)) 'a)
+                   4.0
+                   (abstract-state (noop-node 9) '#hash((r1 . c) (r2 . b)) 'c)
+                   2.0
+                   (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b) (r3 . b)) 'a)
+                   4.0
+                   (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b)) 'c)
+                   2.0
+                   (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b) (r3 . b)) 'c)
+                   4.0
+                   (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b) (r3 . c)) 'b)
+                   3.0
+                   (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b)) 'a)
+                   4.0))))
+
 (run-tests cfa2-tests)
