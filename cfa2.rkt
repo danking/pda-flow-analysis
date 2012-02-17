@@ -43,7 +43,7 @@
 ;;        Paths
 (define (CFA2 flow-analysis)
   (match-define (FlowAnalysis initial-state open? close?
-                              state-equal? _ gte state-similar?
+                              state-equal? _ gte _
                               NextStates/Flow _)
                 flow-analysis)
 
@@ -69,7 +69,6 @@
                     (match sum
                       ((BP open~ close~)
                        (and (close? close~)
-                            (state-similar? open2 open~) ; is this redundant with gte?
                             (gte open~ open2)))))
                   (for/fold
                       ([W W]
@@ -79,7 +78,6 @@
                        (match sum
                          ((BP open~ close~)
                           (and (close? close~)
-                               (state-similar? open2 open~) ; is this redundant with gte?
                                (gte open~ open2)))))
                     (match sum
                       ((BP open~ close~)
