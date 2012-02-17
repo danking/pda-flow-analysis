@@ -1,7 +1,7 @@
 #lang racket
 (require "cfa2.rkt")
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Tests
+;; Structures
 
 (define-struct flow-state (astate flow) #:transparent)
 (define-struct abstract-state (node re st) #:transparent)
@@ -9,6 +9,11 @@
 (define-struct (push-node node) (symbol) #:transparent)
 (define-struct (pop-node node) (reg) #:transparent)
 (define-struct (noop-node node) () #:transparent)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Common Fucntions
+;;
+;; functions which are used by more than one flow analysis
 
 (define (push? flow-state)
   (push-node? (abstract-state-node (flow-state-astate flow-state))))
@@ -35,8 +40,45 @@
                     10 (pop-node 10 'r3))
             uid))
 
-(define (simple-min-headroom)
+(define (succ-node node)
+  (for/set ([uid (in-set
+                  (hash-ref (hasheq 1 (set 2)
+                                    2 (set 3)
+                                    3 (set 4)
+                                    4 (set 5)
+                                    5 (set 6 2)
+                                    6 (set 7)
+                                    7 (set 8)
+                                    8 (set 9)
+                                    9 (set 10)
+                                    10 (set 10))
+                            (node-uid node)))])
+    (uid->node uid)))
+(define succ-states
+  (match-lambda
+    [(abstract-state node env astack)
+     (for/set ([s~ (in-set (succ-node node))])
+       (match node
+         [(push-node _ symbol)
+          (abstract-state s~ env symbol)]
+         [_ (abstract-state s~ env astack)]))]))
+(define (pop-succ-states push pop)
+  (match-define (abstract-state _ _ stack-before-push)
+                push)
+  (match-define (abstract-state (pop-node uid reg) env stack-after-push)
+                pop)
 
+  (for/set ([node (in-set (succ-node (pop-node uid reg)))])
+    (abstract-state node
+                    (hash-set env reg stack-after-push)
+                    stack-before-push)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Minimum Headroom
+;;
+;; computes the minimum amount of headroom which will be accesible before
+;; execution of the given state
+(define (min-headroom)
   (define join
     (match-lambda*
       [(list (flow-state s1 f1) (flow-state s1 f2))
@@ -46,39 +88,6 @@
       [(list (flow-state s1 f1) (flow-state s1 f2))
        (<= f1 f2)]
       [(list (flow-state _ _) (flow-state _ _)) #f]))
-
-  (define (succ-node node)
-    (for/set ([uid (in-set
-                    (hash-ref (hasheq 1 (set 2)
-                                      2 (set 3)
-                                      3 (set 4)
-                                      4 (set 5)
-                                      5 (set 6 2)
-                                      6 (set 7)
-                                      7 (set 8)
-                                      8 (set 9)
-                                      9 (set 10)
-                                      10 (set 10))
-                              (node-uid node)))])
-      (uid->node uid)))
-  (define succ-states
-    (match-lambda
-      [(abstract-state node env astack)
-       (for/set ([s~ (in-set (succ-node node))])
-         (match node
-           [(push-node _ symbol)
-            (abstract-state s~ env symbol)]
-           [_ (abstract-state s~ env astack)]))]))
-  (define (pop-succ-states push pop)
-    (match-define (abstract-state _ _ stack-before-push)
-                  push)
-    (match-define (abstract-state (pop-node uid reg) env stack-after-push)
-                  pop)
-
-    (for/set ([node (in-set (succ-node (pop-node uid reg)))])
-      (abstract-state node
-                      (hash-set env reg stack-after-push)
-                      stack-before-push)))
 
   (define (next-flow fstate)
     (match-define (flow-state _ flow) fstate)
@@ -112,13 +121,14 @@
 
 (define-test-suite cfa2-tests
   (test-case
-   "CFA2 simple-min-headroom"
-   (define Paths (CFA2 (simple-min-headroom)))
+   "CFA2 min-headroom"
+   (define Paths (CFA2 (min-headroom)))
    (check-equal?  (bpset->fv-hash Paths
                                   (lambda (fstate)
                                     (match fstate
                                       ((flow-state astate fv) (values astate fv))))
-                                  min)
+                                  min
+                                  +inf.0)
                   (hash
                    (abstract-state (push-node 1 'a) '#hash() 'ε)
                    5.0
