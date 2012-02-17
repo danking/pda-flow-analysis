@@ -114,6 +114,112 @@
                 join gte state-similar?
                 succ-states/flow pop-succ-states/flow))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Previous States
+;;
+;; Computes the reverse state graph
+(define (prev-states)
+  (define join
+    (match-lambda*
+      [(list (flow-state s1 f1) (flow-state s1 f2))
+       (flow-state s1 (set-union f1 f2))]))
+  (define gte
+    (match-lambda*
+      [(list (flow-state s1 f1) (flow-state s1 f2))
+       (subset? f2 f1)]
+      [(list (flow-state _ _) (flow-state _ _)) #f]))
+
+  (define (succ-states/flow fstate)
+    (match-define (flow-state astate fv) fstate)
+
+    (for/set ([astate~ (in-set (succ-states astate))])
+      (flow-state astate~ (set astate))))
+
+  (define (pop-succ-states/flow push-fstate pop-fstate)
+    (match-define (flow-state push-astate _) push-fstate)
+    (match-define (flow-state pop-astate _) pop-fstate)
+
+    (for/set ([astate~ (in-set (pop-succ-states push-astate pop-astate))])
+      (flow-state astate~ (set pop-astate))))
+
+  (define initial-abstract-state (abstract-state (uid->node 1) (hash) 'ε))
+
+  (FlowAnalysis (flow-state initial-abstract-state (set))
+                push? pop? state-equal?
+                join gte state-similar?
+                succ-states/flow pop-succ-states/flow))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Minimum Needed
+;;
+;; A backwards flow analysis which computes the minimum amount of headroom which
+;; will be needed after execution of this
+(define (min-needed)
+  (define reverse-state-graph
+    (hash
+     (abstract-state (push-node 3 'b) '#hash() 'c)
+     (set (abstract-state (noop-node 2) '#hash() 'c))
+     (abstract-state (noop-node 2) '#hash() 'c)
+     (set (abstract-state (noop-node 5) '#hash() 'c))
+     (abstract-state (noop-node 8) '#hash((r2 . b) (r1 . c)) 'a)
+     (set (abstract-state (pop-node 7 'r2) '#hash((r1 . c)) 'b))
+     (abstract-state (push-node 4 'c) '#hash() 'b)
+     (set
+      (abstract-state (push-node 3 'b) '#hash() 'c)
+      (abstract-state (push-node 3 'b) '#hash() 'a))
+     (abstract-state (push-node 3 'b) '#hash() 'a)
+     (set (abstract-state (noop-node 2) '#hash() 'a))
+     (abstract-state (pop-node 10 'r3) '#hash((r2 . b) (r1 . c)) 'a)
+     (set (abstract-state (noop-node 9) '#hash((r2 . b) (r1 . c)) 'a))
+     (abstract-state (noop-node 2) '#hash() 'a)
+     (set (abstract-state (push-node 1 'a) '#hash() 'ε))
+     (abstract-state (noop-node 9) '#hash((r2 . b) (r1 . c)) 'a)
+     (set (abstract-state (noop-node 8) '#hash((r2 . b) (r1 . c)) 'a))
+     (abstract-state (pop-node 6 'r1) '#hash() 'c)
+     (set (abstract-state (noop-node 5) '#hash() 'c))
+     (abstract-state (pop-node 7 'r2) '#hash((r1 . c)) 'b)
+     (set (abstract-state (pop-node 6 'r1) '#hash() 'c))
+     (abstract-state (push-node 1 'a) '#hash() 'ε)
+     (set)
+     (abstract-state (noop-node 5) '#hash() 'c)
+     (set (abstract-state (push-node 4 'c) '#hash() 'b))))
+
+  (define join
+    (match-lambda*
+      [(list (flow-state s1 f1) (flow-state s1 f2))
+       (flow-state s1 (min f1 f2))]))
+  (define gte
+    (match-lambda*
+      [(list (flow-state s1 f1) (flow-state s1 f2))
+       (<= f1 f2)]
+      [(list (flow-state _ _) (flow-state _ _)) #f]))
+
+  (define (next-flow fstate)
+    (match-define (flow-state _ flow) fstate)
+
+    (cond [(push? fstate) (add1 flow)]
+          [(pop? fstate)  (max (sub1 flow) 0)]
+          [else flow]))
+
+  (define (prev-states st)
+    (hash-ref reverse-state-graph st))
+  (define (push-prev-states pop push)
+    (hash-ref reverse-state-graph push))
+
+  (define (prev-states/flow fstate)
+    (match-define (flow-state astate fv) fstate)
+
+    (for/set ([astate~ (in-set (prev-states astate))])
+      (flow-state astate~ (next-flow fstate))))
+
+  (define (push-prev-states/flow pop-fstate push-fstate)
+    (prev-states/flow push-fstate))
+
+  (FlowAnalysis (flow-state (abstract-state (uid->node 1) (hash) 'ε) 5)
+                push? pop? state-equal?
+                join gte state-similar?
+                prev-states/flow push-prev-states/flow))
+
 (require rackunit
          rackunit/text-ui
          "utilities.rkt")
