@@ -5,17 +5,18 @@
 ;; bpset->fv-hash : [SetOf BP]
 ;;                  [FState -> AState FV]
 ;;                  [FV FV -> FV]
+;;                  FV
 ;;                  ->
 ;;                  [Hash AState FV]
 ;; the splitter should return two values when given a flow-state, the abstract
 ;; state and the flow value.
-(define (bpset->fv-hash bpset splitter join)
+(define (bpset->fv-hash bpset splitter join bottom)
   (for/fold ((hsh (hash)))
       ((bp (in-set bpset)))
     (match-define (BP openfstate fstate) bp)
     (define (add-to-hash fstate hsh)
       (define-values (astate fv) (splitter fstate))
-      (hash-set hsh astate (join (hash-ref hsh astate +inf.0)
+      (hash-set hsh astate (join (hash-ref hsh astate bottom)
                                  fv)))
 
     (add-to-hash openfstate (add-to-hash fstate hsh))))
