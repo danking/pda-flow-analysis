@@ -5,6 +5,7 @@
   (let ((e (for/first ((e (in-set s))) e)))
     (values e (set-remove s e))))
 
+;; a for/first which allows returning multiple values
 (define-syntax my-for/first
   (syntax-rules ()
     ((for/first ((id clause) when-clauses ...)
