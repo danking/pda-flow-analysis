@@ -215,7 +215,10 @@
   (define (push-prev-states/flow pop-fstate push-fstate)
     (prev-states/flow push-fstate))
 
-  (FlowAnalysis (flow-state (abstract-state (uid->node 1) (hash) 'ε) 5)
+  (FlowAnalysis (flow-state (abstract-state (pop-node 10 'r3) '#hash((r2 . b)
+                                                                     (r1 . c))
+                                            'a)
+                            0)
                 push? pop? state-equal?
                 join gte state-similar?
                 prev-states/flow push-prev-states/flow))
