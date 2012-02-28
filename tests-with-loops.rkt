@@ -203,8 +203,6 @@
 
   (define (prev-states st)
     (hash-ref reverse-state-graph st))
-  (define (push-prev-states pop push)
-    (hash-ref reverse-state-graph push))
 
   (define (prev-states/flow fstate)
     (match-define (flow-state astate fv) fstate)
