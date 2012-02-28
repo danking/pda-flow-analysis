@@ -230,48 +230,48 @@
   (test-case
    "CFA2 min-headroom"
    (define Paths (CFA2 (min-headroom)))
-   (check-equal?  (bpset->fv-hash Paths
-                                  (lambda (fstate)
-                                    (match fstate
-                                      ((flow-state astate fv) (values astate fv))))
-                                  min
-                                  +inf.0)
-                  (hash
-                   (abstract-state (push-node 1 'a) '#hash() 'ε)
-                   5.0
-                   (abstract-state (noop-node 2) '#hash() 'c)
-                   0.0
-                   (abstract-state (noop-node 2) '#hash() 'a)
-                   4.0
-                   (abstract-state (push-node 3 'b) '#hash() 'c)
-                   0.0
-                   (abstract-state (push-node 3 'b) '#hash() 'a)
-                   4.0
-                   (abstract-state (push-node 4 'c) '#hash() 'b)
-                   0.0
-                   (abstract-state (noop-node 5) '#hash() 'c)
-                   0.0
-                   (abstract-state (pop-node 6 'r1) '#hash() 'c)
-                   0.0
-                   (abstract-state (pop-node 7 'r2) '#hash((r1 . c)) 'b)
-                   1.0
-                   (abstract-state (noop-node 8) '#hash((r1 . c) (r2 . b)) 'a)
-                   4.0
-                   (abstract-state (noop-node 8) '#hash((r1 . c) (r2 . b)) 'c)
-                   2.0
-                   (abstract-state (noop-node 9) '#hash((r1 . c) (r2 . b)) 'a)
-                   4.0
-                   (abstract-state (noop-node 9) '#hash((r1 . c) (r2 . b)) 'c)
-                   2.0
-                   (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b) (r3 . b)) 'a)
-                   4.0
-                   (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b)) 'c)
-                   2.0
-                   (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b) (r3 . b)) 'c)
-                   4.0
-                   (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b) (r3 . c)) 'b)
-                   3.0
-                   (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b)) 'a)
-                   4.0))))
+   (check-equal? (bpset->fv-hash Paths
+                                 (lambda (fstate)
+                                   (match fstate
+                                     ((flow-state astate fv) (values astate fv))))
+                                 min
+                                 +inf.0)
+                 (hash
+                  (abstract-state (push-node 1 'a) '#hash() 'ε)
+                  5.0
+                  (abstract-state (noop-node 2) '#hash() 'c)
+                  0.0
+                  (abstract-state (noop-node 2) '#hash() 'a)
+                  4.0
+                  (abstract-state (push-node 3 'b) '#hash() 'c)
+                  0.0
+                  (abstract-state (push-node 3 'b) '#hash() 'a)
+                  4.0
+                  (abstract-state (push-node 4 'c) '#hash() 'b)
+                  0.0
+                  (abstract-state (noop-node 5) '#hash() 'c)
+                  0.0
+                  (abstract-state (pop-node 6 'r1) '#hash() 'c)
+                  0.0
+                  (abstract-state (pop-node 7 'r2) '#hash((r1 . c)) 'b)
+                  1.0
+                  (abstract-state (noop-node 8) '#hash((r1 . c) (r2 . b)) 'a)
+                  4.0
+                  (abstract-state (noop-node 8) '#hash((r1 . c) (r2 . b)) 'c)
+                  2.0
+                  (abstract-state (noop-node 9) '#hash((r1 . c) (r2 . b)) 'a)
+                  4.0
+                  (abstract-state (noop-node 9) '#hash((r1 . c) (r2 . b)) 'c)
+                  2.0
+                  (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b) (r3 . b)) 'a)
+                  4.0
+                  (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b)) 'c)
+                  2.0
+                  (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b) (r3 . b)) 'c)
+                  4.0
+                  (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b) (r3 . c)) 'b)
+                  3.0
+                  (abstract-state (pop-node 10 'r3) '#hash((r1 . c) (r2 . b)) 'a)
+                  4.0))))
 
 (run-tests cfa2-tests)
