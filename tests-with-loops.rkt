@@ -103,11 +103,11 @@
       (flow-state astate~ (next-flow fstate))))
 
   (define (pop-succ-states/flow push-fstate pop-fstate)
-    (match-define (flow-state push-astate _) push-fstate)
+    (match-define (flow-state push-astate push-fv) push-fstate)
     (match-define (flow-state pop-astate _) pop-fstate)
 
     (for/set ([astate~ (in-set (pop-succ-states push-astate pop-astate))])
-      (flow-state astate~ (next-flow pop-fstate))))
+      (flow-state astate~ (max push-fv (next-flow pop-fstate)))))
 
   (FlowAnalysis (flow-state (abstract-state (uid->node 1) (hash) 'ε) 5)
                 push? pop? state-equal?
