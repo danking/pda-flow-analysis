@@ -1,13 +1,9 @@
 #lang racket
+(require "../racket-utils/set-utilities.rkt")
 (provide FlowAnalysis BP CFA2)
-
-(define (set-get-one/rest s)
-  (let ((e (for/first ((e (in-set s))) e)))
-    (values e (set-remove s e))))
 
 (define-struct BP (open node) #:transparent)
 ;; BP : OpenState × State
-
 
 ;; W : [SetOf BP]
 ;; Paths : [SetOf BP]
