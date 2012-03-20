@@ -27,7 +27,7 @@
 ;; CFA2 : Analysis
 ;;        ->
 ;;        Paths
-(define (CFA2 flow-analysis)
+(define (CFA2 flow-analysis #:debug [debug 0])
   (match-define (FlowAnalysis initial-state open? close?
                               state-equal? join gte state-similar?
                               NextStates/Flow NextStatesAcross/Flow)
@@ -69,6 +69,7 @@
     (if (set-empty? W)
         Paths
         (let-values (((task W) (set-get-one/rest W)))
+          (when (> debug 0) (printf "investigating: ~a\n" task))
           (match task
             ((BP open (? close? close))
              (let-values (((W Paths)
