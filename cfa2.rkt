@@ -1,5 +1,6 @@
 #lang racket
-(require "../racket-utils/set-utilities.rkt")
+(require ; "../racket-utils/set-utilities.rkt"
+         "../racket-utils/similar-sets.rkt")
 (provide FlowAnalysis BP CFA2)
 
 (define-struct BP (open node) #:transparent)
@@ -10,7 +11,7 @@
 
 (define-struct FlowAnalysis
   (initial-state open? close? state-equal?
-                 join gte state-similar?
+                 join gte state-similar? state-hash-code
                  NextStates/Flow NextStatesAcross/Flow))
 ;; A FlowAnalysis is a
 ;;   (FlowAnalysis FState
@@ -29,9 +30,11 @@
 ;;        Paths
 (define (CFA2 flow-analysis #:debug [debug 0])
   (match-define (FlowAnalysis initial-state open? close?
-                              state-equal? join gte state-similar?
+                              state-equal? join gte state-similar? state-hash-code
                               NextStates/Flow NextStatesAcross/Flow)
                 flow-analysis)
+
+  (define empty-set (set join state-equal? state-similar? state-hash-code))
 
   (define (bp-similar? bp1 bp2)
     (match-define (BP open1 node1) bp1)
@@ -57,7 +60,7 @@
   (define (set-add/fv s bp)
     (match-define (BP open node) bp)
 
-    (let ((set-bp (for/first ([bp~ (in-set s)]
+    (let ((set-bp (for/first ([bp~ s]
                               #:when (bp-similar? bp~ bp))
                     bp~)))
       (cond [(false? set-bp) (set-add s bp)]
@@ -75,7 +78,7 @@
              (let-values (((W Paths)
                            (for/fold ([W W]
                                       [Paths Paths])
-                                     ([call (in-set Callers)]
+                                     ([call Callers]
                                       #:when (match call
                                                ((BP gf open~)
                                                 (state-similar? open open~))))
@@ -88,8 +91,8 @@
             ((BP open1 (? open? open2))
              (let-values (((W Paths)
                            (let ((relevant-summaries
-                                  (for/fold ([relevant-summaries (set)])
-                                      ([summary (in-set Summaries)]
+                                  (for/fold ([relevant-summaries empty-set])
+                                      ([summary Summaries]
                                        #:when (match summary
                                                 ((BP open~ close~)
                                                  (gte open~ open2))))
@@ -99,7 +102,7 @@
                                                  W Paths)
                                  (for/fold ([W W]
                                             [Paths Paths])
-                                     ([summary (in-set relevant-summaries)])
+                                     ([summary relevant-summaries])
                                    (match summary
                                      ((BP open~ close~)
                                       (PropagateAcross open1 open~ close~ W Paths))))))))
@@ -114,7 +117,7 @@
   (define (Propagate open node W Paths)
     (define bp (BP open node))
 
-    (let ((set-bp (for/first ([bp~ (in-set Paths)]
+    (let ((set-bp (for/first ([bp~ Paths]
                               #:when (bp-similar? bp~ bp))
                     bp~)))
       (cond [(false? set-bp)    (values (set-add W bp) (set-add Paths bp))]
@@ -131,12 +134,12 @@
   (define (propagate-loop push succs W Paths)
     (for/fold ([W W]
                [Paths Paths])
-        ([s (in-set succs)])
+        ([s succs])
       (Propagate push s W Paths)))
 
   (let-values (((W Paths)
                 (propagate-loop initial-state
                                 (NextStates/Flow initial-state)
-                                (set)
-                                (set))))
-    (loop W Paths (set) (set))))
+                                empty-set
+                                empty-set)))
+    (loop W Paths empty-set empty-set)))
