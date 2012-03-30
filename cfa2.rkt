@@ -34,8 +34,6 @@
                               NextStates/Flow NextStatesAcross/Flow)
                 flow-analysis)
 
-  (define empty-set (set join state-equal? state-similar? state-hash-code))
-
   (define (bp-similar? bp1 bp2)
     (match-define (BP open1 node1) bp1)
     (match-define (BP open2 node2) bp2)
@@ -57,6 +55,12 @@
     (BP (join open1 open2)
         (join node1 node2)))
 
+  (define (bp-hash-code bp)
+    (match-define (BP open node) bp)
+    (+ (state-hash-code open) (state-hash-code node)))
+
+  (define empty-bp-set (set join state-equal? bp-similar? bp-hash-code))
+
   (define (set-add/fv s bp)
     (match-define (BP open node) bp)
 
@@ -65,7 +69,7 @@
                     bp~)))
       (cond [(false? set-bp) (set-add s bp)]
             [(bp-gte set-bp bp) s]
-            [else (set-add (set-remove s set-bp)
+            [else (set-add (set-remove/similar s set-bp)
                            (bp-join set-bp bp))])))
 
   (define (loop W Paths Summaries Callers)
@@ -91,7 +95,7 @@
             ((BP open1 (? open? open2))
              (let-values (((W Paths)
                            (let ((relevant-summaries
-                                  (for/fold ([relevant-summaries empty-set])
+                                  (for/fold ([relevant-summaries empty-bp-set])
                                       ([summary Summaries]
                                        #:when (match summary
                                                 ((BP open~ close~)
@@ -123,8 +127,8 @@
       (cond [(false? set-bp)    (values (set-add W bp) (set-add Paths bp))]
             [(bp-gte set-bp bp) (values W Paths)]
             [else (let ((joined-bp (bp-join set-bp bp)))
-                    (values (set-add (set-remove W set-bp) joined-bp)
-                            (set-add (set-remove Paths set-bp) joined-bp)))])))
+                    (values (set-add (set-remove/similar W set-bp) joined-bp)
+                            (set-add (set-remove/similar Paths set-bp) joined-bp)))])))
 
   ;; PropogateAcross : FState FState State W Paths -> W Paths
   (define (PropagateAcross grandfather-open open close W Paths)
@@ -140,6 +144,6 @@
   (let-values (((W Paths)
                 (propagate-loop initial-state
                                 (NextStates/Flow initial-state)
-                                empty-set
-                                empty-set)))
-    (loop W Paths empty-set empty-set)))
+                                empty-bp-set
+                                empty-bp-set)))
+    (loop W Paths empty-bp-set empty-bp-set)))
