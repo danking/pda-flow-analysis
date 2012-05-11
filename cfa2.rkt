@@ -130,7 +130,7 @@
     (match (set-get-one/rest W)
       ((none) Paths)
       ((some (list task W))
-       (when (> debug 0) (printf "investigating: ~a\n" task))
+       (dprint "[loop] investigating: ~a\n" task)
        (match task
          ((BP open (? close? close))
           (let-values (((W Paths)
@@ -182,6 +182,11 @@
                [Paths Paths])
         ([s succs])
       (Propagate push s W Paths)))
+
+  (define (dprint . args)
+    (when (> debug 0)
+      (apply printf args)
+      (flush-output)))
 
   (let-values (((W Paths)
                 (propagate-loop initial-state
