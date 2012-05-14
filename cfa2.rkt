@@ -36,6 +36,12 @@
                               NextStates/Flow NextStatesAcross/Flow)
                 flow-analysis)
 
+  (define (bp-equal? bp1 bp2)
+    (match-define (BP open1 node1) bp1)
+    (match-define (BP open2 node2) bp2)
+    (and (state-equal? open1 open2)
+         (state-equal? node1 node2)))
+
   (define (bp-similar? bp1 bp2)
     (match-define (BP open1 node1) bp1)
     (match-define (BP open2 node2) bp2)
@@ -61,7 +67,7 @@
     (match-define (BP open node) bp)
     (+ (state-hash-code open) (state-hash-code node)))
 
-  (define empty-W/Paths-set (set bp-join equal? bp-similar? bp-hash-code))
+  (define empty-W/Paths-set (set bp-join bp-equal? bp-similar? bp-hash-code))
 
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -91,7 +97,7 @@
       ((none)         (basic-seteq))))
 
   (define empty-Callers-set (set basic-set-union/singletons-are-sets
-                                 equal?
+                                 bp-equal?
                                  similar-callee?
                                  callers-hash-code))
 
@@ -117,7 +123,7 @@
       ((none) (none))))
 
   (define empty-Summaries-set (set basic-set-union/singletons-are-sets
-                                   equal?
+                                   bp-equal?
                                    similar-open?
                                    summaries-hash-code))
 
