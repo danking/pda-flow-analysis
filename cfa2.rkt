@@ -68,7 +68,7 @@
   ;; Common to Callers and Summaries
   (define (basic-set-union/singletons-are-sets v1 v2)
     (match (list v1 v2)
-      ((list (BP _ _) (BP _ _)) (basic-set v1 v2))
+      ((list (BP _ _) (BP _ _)) (basic-seteq v1 v2))
       ((or (list (and bp (BP _ _)) a-basic-set)
            (list a-basic-set       (and bp (BP _ _))))
        (basic-set-add a-basic-set bp))
@@ -87,8 +87,8 @@
 
   (define (get-callers Callers open)
     (match (set-get-similar Callers (BP #f open))
-      ((some callers) (if (basic-set? callers) callers (basic-set callers)))
-      ((none)         (basic-set))))
+      ((some callers) (if (basic-set-eq? callers) callers (basic-seteq callers)))
+      ((none)         (basic-seteq))))
 
   (define empty-Callers-set (set basic-set-union/singletons-are-sets
                                  equal?
@@ -110,7 +110,7 @@
     (match (set-get-similar Summaries (BP open #f))
       ((some similar-summaries)
        (some (for/fold ([gte-summaries (basic-set)])
-                       ([summary (if (basic-set? similar-summaries) similar-summaries (basic-set similar-summaries))]
+                       ([summary (if (basic-set-eq? similar-summaries) similar-summaries (basic-seteq similar-summaries))]
                         #:when (match summary
                                  ((BP open2 _) (gte open2 open))))
                (basic-set-add gte-summaries summary))))
