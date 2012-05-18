@@ -136,7 +136,7 @@
     (match (set-get-one/rest W)
       ((none) Paths)
       ((some (list task W))
-       (dprint "[loop] investigating: ~a\n" task)
+       (dprint "[loop] investigating: ~v\n" task)
        (match task
          ((BP open (? close? close))
           (let-values (((W Paths)
