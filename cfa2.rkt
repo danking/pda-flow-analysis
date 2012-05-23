@@ -93,7 +93,7 @@
 
   (define (get-callers Callers open)
     (match (set-get-similar Callers (BP #f open))
-      ((some callers) (if (basic-set-eq? callers) callers (basic-seteq callers)))
+      ((some callers) (if (basic-set? callers) callers (basic-seteq callers)))
       ((none)         (basic-seteq))))
 
   (define empty-Callers-set (set basic-set-union/singletons-are-sets
@@ -116,7 +116,7 @@
     (match (set-get-similar Summaries (BP open #f))
       ((some similar-summaries)
        (some (for/fold ([gte-summaries (basic-set)])
-                       ([summary (if (basic-set-eq? similar-summaries) similar-summaries (basic-seteq similar-summaries))]
+                       ([summary (if (basic-set? similar-summaries) similar-summaries (basic-seteq similar-summaries))]
                         #:when (match summary
                                  ((BP open2 _) (gte open2 open))))
                (basic-set-add gte-summaries summary))))
