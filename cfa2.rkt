@@ -129,9 +129,6 @@
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-  (define (set-add/fv s bp)
-    (set-add s bp))
-
   (define (loop W Paths Summaries Callers)
     (match (set-get-one/rest W)
       ((none) Paths)
