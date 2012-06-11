@@ -131,7 +131,7 @@
 
   (define (loop W Paths Summaries Callers)
     (match (set-get-one/rest W)
-      ((none) Paths)
+      ((none) (values Paths Summaries Callers))
       ((some (list task W))
        (dprint "[loop] investigating: ~v\n" task)
        (match task
