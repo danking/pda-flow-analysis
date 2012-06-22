@@ -87,7 +87,7 @@
 
   (define (get-summaries Summaries open)
     (for/fold ([gte-summaries (basic-set)])
-              ([summary (mas-get-similar Summaries (BP open #f))]
+              ([summary (mas-get-similar Summaries 'same-open (BP open #f))]
          #:when (match summary
                   ((BP open2 _) (gte open2 open))))
       (basic-set-add gte-summaries summary)))
