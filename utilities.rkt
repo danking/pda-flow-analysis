@@ -21,6 +21,11 @@
 
     (add-to-hash openfstate (add-to-hash fstate hsh))))
 
+(define (fstate-bp-set->term-bp-set bpset term-extractor)
+  (for/set ((bp (in-set bpset)))
+    (match-define (BP openfstate fstate) bp)
+    (BP (term-extractor openfstate) (term-extractor fstate))))
+
 ;; sorts by UID
 (define (fv-hash->sorted-list hsh get-uid)
   (sort (hash->list hsh)
