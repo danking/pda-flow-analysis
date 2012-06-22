@@ -12,7 +12,7 @@
 ;; state and the flow value.
 (define (bpset->fv-hash bpset splitter join bottom)
   (for/fold ((hsh (hash)))
-      ((bp (in-set bpset)))
+      ((bp bpset))
     (match-define (BP openfstate fstate) bp)
     (define (add-to-hash fstate hsh)
       (define-values (astate fv) (splitter fstate))
@@ -22,7 +22,7 @@
     (add-to-hash openfstate (add-to-hash fstate hsh))))
 
 (define (fstate-bp-set->term-bp-set bpset term-extractor)
-  (for/set ((bp (in-set bpset)))
+  (for/set ((bp bpset))
     (match-define (BP openfstate fstate) bp)
     (BP (term-extractor openfstate) (term-extractor fstate))))
 
