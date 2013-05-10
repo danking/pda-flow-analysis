@@ -6,6 +6,8 @@
          (prefix-in basic- racket/set))
 (provide FlowAnalysis BP CFA2)
 
+(require "../backchannel.rkt")
+
 (define-struct BP (open node) #:transparent)
 ;; BP : OpenState × State
 
@@ -104,10 +106,12 @@
        (dprint "[loop] investigating: ~v\n" task)
        (match task
          ((BP open (? close? close))
+          (log-info "summary ~a to ~a" open close)
           (let-values (((W Paths)
                         (for/fold ([W W]
                                    [Paths Paths])
                                   ([call (get-callers Callers open)])
+                          (set-bc-val (list 'call Callers open (get-callers Callers open)))
                           (match call
                             ((BP grandfather-open _)
                              (PropagateAcross grandfather-open open close
@@ -115,19 +119,24 @@
 
             (loop W Paths (mas-add Summaries task) Callers)))
          ((BP open1 (? open? open2))
+          (log-info "call ~a to ~a" open1 open2)
           (let-values (((W Paths)
                         (let ((summaries (get-summaries Summaries open2)))
                           (if (basic-set-empty? summaries)
-                              (propagate-loop open2 (NextStates/Flow open2)
-                                              W Paths)
+                              (begin (log-info "No summaires found for ~a to ~a"
+                                               open1 open2)
+                                     (propagate-loop open2 (NextStates/Flow open2)
+                                                     W Paths))
                               (for/fold ([W W]
                                          [Paths Paths])
-                                        ([summary summaries])
+                                  ([summary summaries])
+                                (set-bc-val (list 'sum Summaries open1 summaries))
                                 (match summary
                                   ((BP open~ close~)
                                    (PropagateAcross open1 open~ close~ W Paths))))))))
             (loop W Paths Summaries (mas-add Callers task))))
          ((BP open node)
+          (log-info "step ~a to ~a" open node)
           (let-values (((W Paths)
                         (propagate-loop open (NextStates/Flow node)
                                         W Paths)))
@@ -139,7 +148,8 @@
       (match (set-get-similar Paths bp)
         ((some similar-bp)
          (if (bp-gte similar-bp bp)
-             (values W Paths)
+             (begin (log-info "nothing changed ~a to ~a" open node)
+                    (values W Paths))
              (values (set-add W bp) (set-add Paths bp))))
         (_ (values (set-add W bp) (set-add Paths bp))))))
 
