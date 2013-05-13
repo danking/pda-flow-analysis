@@ -25,7 +25,7 @@
 ;;                 [FState FState -> Boolean]
 ;;                 [FState FState -> FState]
 ;;                 [FState FState -> Boolean]
-;;                 [FState FState -> Boolean]
+;;                 [FState FState -> Number]
 ;;                 [FState -> FState]
 ;;                 [FState FState -> Fstate])
 
