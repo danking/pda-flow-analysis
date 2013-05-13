@@ -76,10 +76,13 @@
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Callers Set
   (define (get-callers Callers open)
-    (mas-get-similar Callers 'same-callee (BP #f open)))
+    (for/set ([call Callers]
+              #:when (match call
+                       ((BP gp open2) (gte open open2))))
+      call))
 
   (define empty-Callers-set
-    (multi-access-set ((same-callee BP-node))))
+    (basic-set))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Summaries Set
@@ -88,14 +91,13 @@
     (equal-hash-code open))
 
   (define (get-summaries Summaries open)
-    (for/fold ([gte-summaries (basic-set)])
-              ([summary (mas-get-similar Summaries 'same-open (BP open #f))]
-         #:when (match summary
-                  ((BP open2 _) (gte open2 open))))
-      (basic-set-add gte-summaries summary)))
+    (for/set ([summary Summaries]
+              #:when (match summary
+                       ((BP open2 _) (gte open2 open))))
+      summary))
 
   (define empty-Summaries-set
-    (multi-access-set ((same-open BP-open))))
+    (basic-set))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -117,7 +119,7 @@
                              (PropagateAcross grandfather-open open close
                                               W Paths))))))
 
-            (loop W Paths (mas-add Summaries task) Callers)))
+            (loop W Paths (basic-set-add Summaries task) Callers)))
          ((BP open1 (? open? open2))
           (log-info "call ~a to ~a" open1 open2)
           (let-values (((W Paths)
@@ -134,7 +136,7 @@
                                 (match summary
                                   ((BP open~ close~)
                                    (PropagateAcross open1 open~ close~ W Paths))))))))
-            (loop W Paths Summaries (mas-add Callers task))))
+            (loop W Paths Summaries (basic-set-add Callers task))))
          ((BP open node)
           (log-info "step ~a to ~a" open node)
           (let-values (((W Paths)
