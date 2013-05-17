@@ -3,6 +3,7 @@
          "../racket-utils/similar-sets.rkt"
          "../racket-utils/multi-access-sets.rkt"
          "../racket-utils/option.rkt"
+         "../racket-utils/partitioned-sets.rkt"
          (prefix-in basic- racket/set))
 (provide FlowAnalysis BP CFA2)
 
@@ -76,28 +77,32 @@
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Callers Set
   (define (get-callers Callers open)
-    (for/set ([call Callers]
-              #:when (match call
-                       ((BP gp open2) (gte open open2))))
-      call))
+    (pset-equivclass-partition Callers (BP #f open)))
+
+  (define (similar-callee? bp1 bp2)
+    (match-define (BP open1 node1) bp1)
+    (match-define (BP open2 node2) bp2)
+
+    (state-similar? node1 node2))
 
   (define empty-Callers-set
-    (basic-set))
+    (make-partitioned-set similar-callee?
+                          (compose state-hash-code BP-node)))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Summaries Set
-  (define (summaries-hash-code bp)
-    (match-define (BP open _) bp)
-    (equal-hash-code open))
-
   (define (get-summaries Summaries open)
-    (for/set ([summary Summaries]
-              #:when (match summary
-                       ((BP open2 _) (gte open2 open))))
-      summary))
+    (pset-equivclass-partition Summaries (BP open #f)))
+
+  (define (similar-caller? bp1 bp2)
+    (match-define (BP open1 node1) bp1)
+    (match-define (BP open2 node2) bp2)
+
+    (state-similar? open1 open2))
 
   (define empty-Summaries-set
-    (basic-set))
+    (make-partitioned-set similar-caller?
+                          (compose state-hash-code BP-open)))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -119,7 +124,7 @@
                              (PropagateAcross grandfather-open open close
                                               W Paths))))))
 
-            (loop W Paths (basic-set-add Summaries task) Callers)))
+            (loop W Paths (pset-add Summaries task) Callers)))
          ((BP open1 (? open? open2))
           (log-info "call ~a to ~a" open1 open2)
           (let-values (((W Paths)
@@ -136,7 +141,7 @@
                                 (match summary
                                   ((BP open~ close~)
                                    (PropagateAcross open1 open~ close~ W Paths))))))))
-            (loop W Paths Summaries (basic-set-add Callers task))))
+            (loop W Paths Summaries (pset-add Callers task))))
          ((BP open node)
           (log-info "step ~a to ~a" open node)
           (let-values (((W Paths)
