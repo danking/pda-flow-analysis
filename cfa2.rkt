@@ -4,13 +4,11 @@
          "../racket-utils/multi-access-sets.rkt"
          "../racket-utils/option.rkt"
          "../racket-utils/partitioned-sets.rkt"
+         "bp.rkt"
          (prefix-in basic- racket/set))
-(provide FlowAnalysis BP CFA2)
+(provide FlowAnalysis CFA2)
 
 (require "../backchannel.rkt")
-
-(define-struct BP (open node) #:transparent)
-;; BP : OpenState × State
 
 ;; W : [SetOf BP]
 ;; Paths : [SetOf BP]
