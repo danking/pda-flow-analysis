@@ -31,7 +31,7 @@
 ;;        Paths
 ;;        Summaries
 ;;        Callers
-(define (CFA2 flow-analysis #:debug [debug 0])
+(define (CFA2 flow-analysis)
   (match-define (FlowAnalysis initial-state open? close?
                               state-equal? lattice state-similar? state-hash-code
                               NextStates/Flow NextStatesAcross/Flow)
@@ -109,7 +109,7 @@
     (match (set-get-one/rest W)
       ((none) (values Paths Summaries Callers))
       ((some (list task W))
-       (dprint "[loop] investigating: ~v\n" task)
+       (log-info "[loop] investigating: ~v\n" task)
        (match task
          ((BP open (? close? close))
           (log-info "summary ~a to ~a" open close)
@@ -167,11 +167,6 @@
                [Paths Paths])
         ([s succs])
       (Propagate push s W Paths)))
-
-  (define (dprint . args)
-    (when (> debug 0)
-      (apply printf args)
-      (flush-output)))
 
   (let-values (((W Paths)
                 (propagate-loop initial-state
