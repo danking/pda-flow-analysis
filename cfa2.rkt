@@ -5,6 +5,7 @@
          "../racket-utils/option.rkt"
          "../racket-utils/partitioned-sets.rkt"
          "bp.rkt"
+         "lattice.rkt"
          (prefix-in basic- racket/set))
 (provide FlowAnalysis CFA2)
 
@@ -15,28 +16,32 @@
 
 (define-struct FlowAnalysis
   (initial-state open? close? state-equal?
-                 join gte state-similar? state-hash-code
+                 lattice state-similar? state-hash-code
                  NextStates/Flow NextStatesAcross/Flow))
-;; A FlowAnalysis is a
+;; A [FlowAnalysis FState FV] is a
 ;;   (FlowAnalysis FState
 ;;                 [FState -> Boolean]
 ;;                 [FState -> Boolean]
 ;;                 [FState FState -> Boolean]
-;;                 [FState FState -> FState]
+;;                 [Lattice FV]
 ;;                 [FState FState -> Boolean]
 ;;                 [FState FState -> Number]
 ;;                 [FState -> FState]
 ;;                 [FState FState -> Fstate])
 
 
-;; CFA2 : Analysis
+;; CFA2 : [FlowAnalysis FState FV]
 ;;        ->
 ;;        Paths
+;;        Summaries
+;;        Callers
 (define (CFA2 flow-analysis #:debug [debug 0])
   (match-define (FlowAnalysis initial-state open? close?
-                              state-equal? join gte state-similar? state-hash-code
+                              state-equal? lattice state-similar? state-hash-code
                               NextStates/Flow NextStatesAcross/Flow)
                 flow-analysis)
+  (define join (lattice-join lattice))
+  (define gte (lattice-gte lattice))
 
   (define (bp-equal? bp1 bp2)
     (match-define (BP open1 node1) bp1)
@@ -128,7 +133,7 @@
           (let-values (((W Paths)
                         (let ((summaries (get-summaries Summaries open2)))
                           (if (basic-set-empty? summaries)
-                              (begin (log-info "No summaires found for ~a to ~a"
+                              (begin (log-info "No summaries found for ~a to ~a"
                                                open1 open2)
                                      (propagate-loop open2 (NextStates/Flow open2)
                                                      W Paths))
