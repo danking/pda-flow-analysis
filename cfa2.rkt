@@ -9,8 +9,6 @@
          (prefix-in basic- racket/set))
 (provide FlowAnalysis CFA2)
 
-(require "../backchannel.rkt")
-
 ;; W : [SetOf BP]
 ;; Paths : [SetOf BP]
 
@@ -121,7 +119,6 @@
                         (for/fold ([W W]
                                    [Paths Paths])
                                   ([call (get-callers Callers open)])
-                          (set-bc-val (list 'call Callers open (get-callers Callers open)))
                           (match call
                             ((BP grandfather-open _)
                              (PropagateAcross grandfather-open open close
@@ -140,7 +137,6 @@
                               (for/fold ([W W]
                                          [Paths Paths])
                                   ([summary summaries])
-                                (set-bc-val (list 'sum Summaries open1 summaries))
                                 (match summary
                                   ((BP open~ close~)
                                    (PropagateAcross open1 open~ close~ W Paths))))))))
