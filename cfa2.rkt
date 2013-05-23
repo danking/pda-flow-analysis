@@ -1,7 +1,5 @@
 #lang racket
-(require ; "../racket-utils/set-utilities.rkt"
-         "../racket-utils/similar-sets.rkt"
-         "../racket-utils/multi-access-sets.rkt"
+(require "../racket-utils/similar-sets.rkt"
          "../racket-utils/option.rkt"
          "../racket-utils/partitioned-sets.rkt"
          "bp.rkt"
