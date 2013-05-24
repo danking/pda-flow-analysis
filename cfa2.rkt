@@ -2,28 +2,35 @@
 (require "../racket-utils/similar-sets.rkt"
          "../racket-utils/option.rkt"
          "../racket-utils/partitioned-sets.rkt"
+         "../semantics/flow.rkt"
          "bp.rkt"
-         "lattice.rkt"
+         ;; TODO this should be some built-in module
+         "../../../lattice/lattice.rkt"
          (prefix-in basic- racket/set))
 (provide FlowAnalysis CFA2)
 
 ;; W : [SetOf BP]
 ;; Paths : [SetOf BP]
 
-(define-struct FlowAnalysis
-  (initial-state open? close? state-equal?
-                 lattice state-similar? state-hash-code
-                 NextStates/Flow NextStatesAcross/Flow))
 ;; A [FlowAnalysis FState FV] is a
 ;;   (FlowAnalysis FState
 ;;                 [FState -> Boolean]
 ;;                 [FState -> Boolean]
 ;;                 [FState FState -> Boolean]
-;;                 [Lattice FV]
-;;                 [FState FState -> Boolean]
-;;                 [FState FState -> Number]
+;;                 [Semi-Lattice FV]
 ;;                 [FState -> FState]
 ;;                 [FState FState -> Fstate])
+(define-struct FlowAnalysis
+  (initial-state open? close?
+                 lattice
+                 NextStates/Flow NextStatesAcross/Flow))
+;;
+;; open? identifies states which initiate balanced paths (and, consequently,
+;; cannot be intermediary nodes of balanced paths, i.e. if BP = (start, n1, n2,
+;; ..., end) then forall i, ni cannot be open?)
+;;
+;; close? identifies states which terminate balanced paths (and, consequently,
+;; also cannot be intermediary nodes of balanced paths)
 
 
 ;; CFA2 : [FlowAnalysis FState FV]
@@ -33,75 +40,61 @@
 ;;        Callers
 (define (CFA2 flow-analysis)
   (match-define (FlowAnalysis initial-state open? close?
-                              state-equal? lattice state-similar? state-hash-code
+                              fstate-semi-lattice
                               NextStates/Flow NextStatesAcross/Flow)
                 flow-analysis)
-  (define join (lattice-join lattice))
-  (define gte (lattice-gte lattice))
 
-  (define (bp-equal? bp1 bp2)
-    (match-define (BP open1 node1) bp1)
-    (match-define (BP open2 node2) bp2)
-    (and (state-equal? open1 open2)
-         (state-equal? node1 node2)))
+  (define bp-lattice
+    (pointwise-semi-lattice BP
+                            (BP-open fstate-semi-lattice)
+                            (BP-node fstate-semi-lattice)))
 
-  (define (bp-similar? bp1 bp2)
-    (match-define (BP open1 node1) bp1)
-    (match-define (BP open2 node2) bp2)
-    (and (state-similar? open1 open2)
-         (state-similar? node1 node2)))
+  (define (equal?/ignore-fv x y [recur equal?])
+    (and (recur (flow-state-astate (BP-open x)) (flow-state-astate (BP-open y)))
+         (recur (flow-state-astate (BP-node x)) (flow-state-astate (BP-node y)))))
 
-  (define (bp-gte bp1 bp2)
-    (match-define (BP open1 node1) bp1)
-    (match-define (BP open2 node2) bp2)
-    (and (bp-similar? bp1 bp2)
-         (gte open1 open2)
-         (gte node1 node2)))
-
-  (define (bp-join bp1 bp2)
-    (match-define (BP open1 node1) bp1)
-    (match-define (BP open2 node2) bp2)
-    (unless (bp-similar? bp1 bp2)
-      (error 'bp-join "must supply two similar states"))
-    (BP (join open1 open2)
-        (join node1 node2)))
-
-  (define (bp-hash-code bp)
-    (match-define (BP open node) bp)
-    (+ (state-hash-code open) (state-hash-code node)))
+  (define (equal-hash-code/ignore-fv x [recur equal-hash-code])
+    (+ (recur (flow-state-astate (BP-open x)))
+       (recur (flow-state-astate (BP-node x)))))
 
   (define empty-W/Paths-set
-    (set bp-join bp-equal? bp-similar? bp-hash-code))
+    (set (semi-lattice-join bp-lattice)
+         equal?
+         equal?/ignore-fv
+         equal-hash-code/ignore-fv))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Callers Set
   (define (get-callers Callers open)
     (pset-equivclass-partition Callers (BP #f open)))
 
-  (define (similar-callee? bp1 bp2)
-    (match-define (BP open1 node1) bp1)
-    (match-define (BP open2 node2) bp2)
+  (define (comparable-callee? bp1 bp2)
+    (match-define (BP open1 callee1) bp1)
+    (match-define (BP open2 callee2) bp2)
 
-    (state-similar? node1 node2))
+    ((semi-lattice-comparable? fstate-semi-lattice) callee1 callee2))
 
   (define empty-Callers-set
-    (make-partitioned-set similar-callee?
-                          (compose state-hash-code BP-node)))
+    (make-partitioned-set comparable-callee?
+                          (compose (semi-lattice-comparable?-hash-code fstate-semi-lattice)
+                                   BP-node)))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Summaries Set
   (define (get-summaries Summaries open)
     (pset-equivclass-partition Summaries (BP open #f)))
 
-  (define (similar-caller? bp1 bp2)
+  (define (comparable-caller? bp1 bp2)
     (match-define (BP open1 node1) bp1)
     (match-define (BP open2 node2) bp2)
 
-    (state-similar? open1 open2))
+    ((semi-lattice-comparable? fstate-semi-lattice) open1 open2))
 
   (define empty-Summaries-set
-    (make-partitioned-set similar-caller?
-                          (compose state-hash-code BP-open)))
+    (make-partitioned-set comparable-caller?
+                          (compose (semi-lattice-comparable?-hash-code
+                                    fstate-semi-lattice)
+                                   BP-open)))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -151,7 +144,7 @@
     (let ((bp (BP open node)))
       (match (set-get-similar Paths bp)
         ((some similar-bp)
-         (if (bp-gte similar-bp bp)
+         (if ((semi-lattice-gte? bp-lattice) similar-bp bp)
              (begin (log-info "nothing changed ~a to ~a" open node)
                     (values W Paths))
              (values (set-add W bp) (set-add Paths bp))))
