@@ -5,7 +5,7 @@
          "../semantics/flow.rkt"
          "bp.rkt"
          ;; TODO this should be some built-in module
-         "../../../lattice/lattice.rkt"
+         "../lattice/lattice.rkt"
          (prefix-in basic- racket/set))
 (provide FlowAnalysis CFA2)
 
