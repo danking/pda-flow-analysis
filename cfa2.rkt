@@ -9,8 +9,91 @@
          (prefix-in basic- racket/set))
 (provide FlowAnalysis CFA2)
 
+;; `CFA2' is an flow analysis algorithm for push down automata. A push down
+;; automata is a finite state machine with a stack.
+;;
+;; Some states modify the stack. WLOG, These states may only add one
+;; stack-element to the top of the stack or remove one stack-element from the
+;; top of the stack.
+;;
+;; The states of a push down automata can be partitioned into three sets: Opens,
+;; Closes, and Other.
+;;
+;; The Open and Close states are defined differently depending on the
+;; analysis. For a forward analysis the Open states are the states which "push"
+;; one stack-element onto the stack and the Close states are the states which
+;; "pop" one stack-element off of the stack. For a backward analysis the Open
+;; and Close sets are interchanged such that Opens are "pops" and Closes are
+;; "pushes".
+;;
+;; A bit more precisely,
+;;
+;;   An Open state is a set of stack-modifying states which all change the size
+;;   of the stack in the same way.
+;;
+;;   A Close state is the set of stack-modifying states which modify the stack
+;;   size in the way the Open states do not. (equivalently, the Close set is the
+;;   set of stack-modifying states which are not contained in the Open set)
+;;
+;; The definition of a Balanced Path is central to the algorithm's
+;; idea. Conceptually, a Balanced Path is an execution path from X to Y in which
+;; the stack at state X is "maintained" from X to Y, i.e., the elements on the
+;; stack at X are never pop'd off by any intermening states, and the stack at
+;; state Y is equivalent to the stack at state X.
+;;
+;; One might also think of a Balanced Path as an execution path from X to Y
+;; which does not get stuck when the stack at state X is empty and which leaves
+;; the stack empty again at state Y.
+;;
+;;
+;; The notion can be defined recursively:
+;;
+;; Balanced Path
+;; -------------
+;;
+;; A path (n0, n1, n2, ..., nj) is a Balanced Path iff n0 ∈ Open and
+;; (n1, n2, ..., nj) is an Empty-Stack to Empty-Stack Path.
+;;
+;;
+;; Empty-Stack to Empty-Stack (ES-ES) Path
+;; ---------------------------------------
+;;
+;; 1. The empty path, (), is an Empty-Stack to Empty-Stack (ES-ES) Path.
+;;
+;; 2. A path (n1, n2) is an Empty-Stack to Empty-Stack (ES-ES) Path
+;;    iff n1 ∈ Open and n2 ∈ Close
+;;
+;; 3. A path (n1, n2, ..., nj-1, nj) is an ES-ES Path iff
+;;
+;;    - n2 ∉ (Open ∪ Close), and
+;;    - (n2, ..., nj) is an Empty-Stack to Empty-Stack Path
+;;
+;;   OR
+;;
+;;    - n2 ∈ Open,
+;;    - nj ∈ Close, and
+;;    - (n2, ..., nj-1) is an Empty-Stack to Empty-Stack Path.
+;;
+;;
+;; These definitions are lifted to flow states by ignoring the associated flow
+;; value.
+
+
 ;; W : [SetOf BP]
+;;   if (x,y) is in the W, or workset, then there is a balanced path from x to y
+;;   whose implications have not yet been propagated.
+;;
 ;; Paths : [SetOf BP]
+;;   if (x,y) is in the paths set then there is a balanced path from x to y.
+;;
+;; Summaries : [SetOf BP]
+;;   if (x,y) is in the summaries set then there is a balanced path from x to y
+;;   and y is a close state.
+;;
+;; Callers : [SetOf BP]
+;;   if (x,y) is in the callers set then there is a balanced path frmo x to y
+;;   and y is a open state.
+
 
 ;; A [FlowAnalysis FState FV] is a
 ;;   (FlowAnalysis FState
