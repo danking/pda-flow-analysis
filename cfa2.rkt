@@ -3,8 +3,7 @@
          "../semantics/flow.rkt"
          "bp.rkt"
          ;; TODO this should be some built-in module
-         "../lattice/lattice.rkt"
-         (prefix-in basic- racket/set))
+         "../lattice/lattice.rkt")
 (provide FlowAnalysis CFA2)
 
 ;; `CFA2' is an flow analysis algorithm for push down automata. A push down
@@ -207,7 +206,7 @@
              (let-values
                  (((W Paths)
                    (let ((summaries (get-summaries Summaries open2)))
-                     (if (basic-set-empty? summaries)
+                     (if (set-empty? summaries)
                          (begin (log-info "No summaries found for ~a to ~a"
                                           open1 open2)
                                 (propagate-loop open2 (NextStates/Flow open2)
