@@ -149,8 +149,22 @@
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Callers Set
+
+  ;; get-callers : Callers FState -> [SetOf FState]
+  ;;
+  ;; {(o1,o2) | open ⊒ o2 ∧ (o1,o2) ∈ Callers }
+  ;;
+  ;; The callers set is used to propagate multiple paths of execution through
+  ;; the same, newly created summary. The paths of execution must call to an
+  ;; open node which is subsumed by the open node of the summary. If we
+  ;; propagated a call to a more general open, then the less general summary
+  ;; will not propagate all the information. This results in an unsafe
+  ;; approximation.
+  ;;
   (define (get-callers Callers open)
-    (pset-equivclass-partition Callers (BP #f open)))
+    (for/set ((call (pset-equivclass-partition Callers (BP #f open)))
+              #:when ((semi-lattice-gte? fstate-semi-lattice) open (BP-node call)))
+      call))
 
   (define (comparable-callee? bp1 bp2 [recur equal?])
     (match-define (BP open1 callee1) bp1)
@@ -165,8 +179,21 @@
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Summaries Set
+
+  ;; get-summaries : Summaries FState -> [SetOf FState]
+  ;;
+  ;; {(s-open,s-close) | s-open ⊒ open ∧ (s-open,s-close) ∈ Summaries }
+  ;;
+  ;; The summaries set is used to propagate multiple paths of execution through
+  ;; a empty-stack-to-empty-stack path. If the called-to open is subsumed by the
+  ;; summary's open, then we needn't reinvestigate this
+  ;; empty-stack-to-empty-stack path.
+  ;;
   (define (get-summaries Summaries open)
-    (pset-equivclass-partition Summaries (BP open #f)))
+    (for/set ((summary (pset-equivclass-partition Summaries (BP open #f)))
+              #:when ((semi-lattice-gte? fstate-semi-lattice) (BP-open summary)
+                                                              open))
+      summary))
 
   (define (comparable-caller? bp1 bp2 [recur equal?])
     (match-define (BP open1 node1) bp1)
