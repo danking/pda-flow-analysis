@@ -105,7 +105,7 @@
 ;;                 [FState FState -> Fstate])
 (define-struct FlowAnalysis
   (initial-state open? close?
-                 lattice same-chain? chain-hash-code
+                 lattice same-sub-lattice? sub-lattice-hash-code
                  NextStates/Flow NextStatesAcross/Flow))
 ;;
 ;; open? identifies states which initiate balanced paths (and, consequently,
@@ -124,7 +124,8 @@
 (define (CFA2 flow-analysis)
   (match-define (FlowAnalysis initial-state open? close?
                               fstate-semi-lattice
-                              fstate-same-chain? fstate-chain-hash-code
+                              fstate-same-sub-lattice?
+                              fstate-sub-lattice-hash-code
                               NextStates/Flow NextStatesAcross/Flow)
                 flow-analysis)
 
@@ -133,19 +134,19 @@
                             (BP-open fstate-semi-lattice)
                             (BP-node fstate-semi-lattice)))
 
-  (define (bp-same-chain? bp1 bp2 [recur equal?])
-    (and (fstate-same-chain? (BP-open bp1) (BP-open bp2) recur)
-         (fstate-same-chain? (BP-node bp1) (BP-node bp2) recur)))
+  (define (bp-same-sub-lattice? bp1 bp2 [recur equal?])
+    (and (fstate-same-sub-lattice? (BP-open bp1) (BP-open bp2) recur)
+         (fstate-same-sub-lattice? (BP-node bp1) (BP-node bp2) recur)))
 
   ;; note that we use (equal-hash-code (list ...)) to delegate choosing a good
   ;; way of combining hash codes to Racket
-  (define (bp-chain-hash-code bp [recur equal-hash-code])
-    (equal-hash-code (list (fstate-chain-hash-code (BP-open bp) recur)
-                           (fstate-chain-hash-code (BP-node bp) recur))))
+  (define (bp-sub-lattice-hash-code bp [recur equal-hash-code])
+    (equal-hash-code (list (fstate-sub-lattice-hash-code (BP-open bp) recur)
+                           (fstate-sub-lattice-hash-code (BP-node bp) recur))))
 
   (define empty-W/Paths-set
-    (make-partitioned-set bp-same-chain?
-                          bp-chain-hash-code))
+    (make-partitioned-set bp-same-sub-lattice?
+                          bp-sub-lattice-hash-code))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Callers Set
@@ -156,12 +157,12 @@
     (match-define (BP open1 callee1) bp1)
     (match-define (BP open2 callee2) bp2)
 
-    (fstate-same-chain? callee1 callee2 recur))
+    (fstate-same-sub-lattice? callee1 callee2 recur))
 
   (define empty-Callers-set
     (make-partitioned-set comparable-callee?
                           (lambda (bp [recur equal-hash-code])
-                            (fstate-chain-hash-code (BP-node bp) recur))))
+                            (fstate-sub-lattice-hash-code (BP-node bp) recur))))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Summaries Set
@@ -172,12 +173,12 @@
     (match-define (BP open1 node1) bp1)
     (match-define (BP open2 node2) bp2)
 
-    (fstate-same-chain? open1 open2 recur))
+    (fstate-same-sub-lattice? open1 open2 recur))
 
   (define empty-Summaries-set
     (make-partitioned-set comparable-caller?
                           (lambda (bp [recur equal-hash-code])
-                            (fstate-chain-hash-code (BP-open bp) recur))))
+                            (fstate-sub-lattice-hash-code (BP-open bp) recur))))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
