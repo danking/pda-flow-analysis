@@ -5,6 +5,7 @@
          ;; TODO this should be some built-in module
          "../lattice/lattice.rkt")
 (provide FlowAnalysis CFA2)
+(module+ test (require rackunit))
 
 ;; `CFA2' is an flow analysis algorithm for push down automata. A push down
 ;; automata is a finite state machine with a stack.
@@ -137,6 +138,10 @@
     (and (fstate-same-sub-lattice? (BP-open bp1) (BP-open bp2) recur)
          (fstate-same-sub-lattice? (BP-node bp1) (BP-node bp2) recur)))
 
+  (define (bp-pset-add/join bp-pset bp)
+    (pset-add/join bp-pset bp bp-lattice))
+
+
   ;; note that we use (equal-hash-code (list ...)) to delegate choosing a good
   ;; way of combining hash codes to Racket
   (define (bp-sub-lattice-hash-code bp [recur equal-hash-code])
@@ -227,7 +232,7 @@
                         (PropagateAcross grandfather-open open close
                                          W Paths))))))
 
-               (loop W Paths (pset-add Summaries task) Callers)))
+               (loop W Paths (bp-pset-add/join Summaries task) Callers)))
             ((BP open1 (? open? open2))
              (log-info "call ~a to ~a" open1 open2)
              (let-values
@@ -244,7 +249,7 @@
                            (match summary
                              ((BP open~ close~)
                               (PropagateAcross open1 open~ close~ W Paths))))))))
-               (loop W Paths Summaries (pset-add Callers task))))
+               (loop W Paths Summaries (bp-pset-add/join Callers task))))
             ((BP open node)
              (log-info "step ~a to ~a" open node)
              (let-values
@@ -255,24 +260,14 @@
 
   ;; Propogate : OpenFState FState W Paths -> W Paths
   (define (Propagate open node W Paths)
-    (let* ((bp (BP open node))
-           (same-node-set (set->list (pset-equivclass-partition Paths bp))))
-      (let-values (((greater-or-eq lesser)
-                    (partition (lambda (same-node-bp)
-                                 ((semi-lattice-gte? bp-lattice) same-node-bp
-                                                                 bp))
-                               same-node-set)))
-        ;; verify that (length (append greater-or-eq lesser) <= 1)
-        (sanity-check greater-or-eq lesser)
-        (cond [(not (empty? greater-or-eq))
-               (log-info "nothing changed ~a to ~a" open node)
-               (values W Paths)]
-              [(not (empty? lesser))
-               (values (pset-add (pset-remove W (first lesser)) bp)
-                       (pset-add (pset-remove Paths (first lesser)) bp))]
-              [(and (empty? greater-or-eq)
-                    (empty? lesser))
-               (values (pset-add W bp) (pset-add Paths bp))]))))
+    (define bp (BP open node))
+    (define Paths-equivclass (pset-equivclass-partition Paths bp))
+    (define W-equivclass (pset-equivclass-partition W bp))
+
+    (if (pset-greater-or-equal-is-member? Paths bp bp-lattice)
+        (values W Paths)
+        (values (bp-pset-add/join W bp)
+                (bp-pset-add/join Paths bp))))
 
   ;; PropogateAcross : FState FState State W Paths -> W Paths
   (define (PropagateAcross grandfather-open open close W Paths)
@@ -292,18 +287,74 @@
                                 empty-W/Paths-set)))
     (loop W Paths empty-Summaries-set empty-Callers-set)))
 
-;; sanity-check : [ListOf Any] [ListOf Any] -> Void
+;; tri-partition-set : [X -> Boolean]
+;;                     [X -> Boolean]
+;;                     [SetOf X]
+;;                     ->
+;;                     [SetOf X]
+;;                     [SetOf X]
+;;                     [SetOf X]
 ;;
-;; verify that (length (append greater-or-eq lesser) <= 1)
-(define (sanity-check greater-or-eq lesser)
-  (let ((one-lesser-none-greater? (and (empty? greater-or-eq)
-                                       (not (empty? lesser))
-                                       (empty? (rest lesser))))
-        (one-greater-none-lesser? (and (not (empty? greater-or-eq))
-                                       (empty? (rest greater-or-eq))
-                                       (empty? lesser)))
-        (both-empty (and (empty? greater-or-eq) (empty? lesser))))
-    (unless (or one-lesser-none-greater? one-greater-none-lesser? both-empty)
-      (error 'sanity-check
-             (string-append "The Paths should never contain two non-equivalent "
-                            "comparable elements")))))
+;; Partition the set such that all values for which the first-group? predicate
+;; holds are in the first set, all the elements for which the second-group?
+;; predicate holds are in the second set, and all other elements are in the
+;; third set.
+(define (tri-partition-set first-group? second-group? s)
+  (for/fold
+      ((first (set))
+       (second (set))
+       (third (set)))
+      ((element s))
+    (cond [(first-group? element)
+           (values (set-add first element) second third)]
+          [(second-group? element)
+           (values first (set-add second element) third)]
+          [else
+           (values first second (set-add third element))])))
+
+(module+ test
+  (let-values (((symbols strings others)
+                (tri-partition-set symbol? string? '(a 1 "foo" 2 ds "bar" 3 4 "baz" 21))))
+    (check-equal? symbols (set 'a 'ds))
+    (check-equal? strings (set "foo" "bar" "baz"))
+    (check-equal? others (set 1 2 3 4 21))))
+
+;; pset-add/join : [PartitionedSet X] X [Semi-Lattice X] -> [PartitionedSet X]
+;;
+;; Adds v to pset if nothing in v is greater than or equal to it and removes
+;; anything from the set which is less than it.
+;;
+(define (pset-add/join pset v v-lattice)
+  (define equivclass (pset-equivclass-partition pset v))
+  (define gte? (semi-lattice-gte? v-lattice))
+
+  (let-values
+      (((greater-or-eq lesser incomparable)
+        (tri-partition-set (lambda (x) (gte? x v))
+                           (lambda (x) (gte? v x))
+                           equivclass)))
+    (cond [(not (set-empty? greater-or-eq)) pset]
+          [(not (set-empty? lesser))
+           (pset-add (pset-subtract-set pset lesser) v)]
+          [else (pset-add pset v)])))
+
+;; pset-greater-or-equal-is-member? : [PartitionedSet X] X [Semi-Lattice X] -> Boolean
+;;
+;; NB: Elements which are not in the same partition should be incomparable in
+;; the lattice.
+;;
+;; Determines if any element of pset is greater than or equal to v according to
+;; v-lattice.
+(define (pset-greater-or-equal-is-member? pset v v-lattice)
+  (define equivclass (pset-equivclass-partition pset v))
+  (define gte? (semi-lattice-gte? v-lattice))
+
+  (for/or ((v~ (in-set equivclass))) (gte? v~ v)))
+
+;; pset-subtract-set : [PartitionedSet X] [SetOf X] -> [PartitionedSet X]
+;;
+(define (pset-subtract-set pset set)
+  (for/fold
+      ((pset pset))
+      ((element (in-set set)))
+    (pset-remove pset element)))
