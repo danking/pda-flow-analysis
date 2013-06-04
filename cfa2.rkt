@@ -226,7 +226,7 @@
                  (((W Paths)
                    (for/fold ([W W]
                               [Paths Paths])
-                       ([call (get-callers Callers open)])
+                       ([call (in-set (get-callers Callers open))])
                      (match call
                        ((BP grandfather-open _)
                         (PropagateAcross grandfather-open open close
@@ -245,7 +245,7 @@
                                                 W Paths))
                          (for/fold ([W W]
                                     [Paths Paths])
-                             ([summary summaries])
+                             ([summary (in-set summaries)])
                            (match summary
                              ((BP open~ close~)
                               (PropagateAcross open1 open~ close~ W Paths))))))))
@@ -277,7 +277,7 @@
   (define (propagate-loop push succs W Paths)
     (for/fold ([W W]
                [Paths Paths])
-        ([s succs])
+        ([s (in-set succs)])
       (Propagate push s W Paths)))
 
   (let-values (((W Paths)
@@ -304,7 +304,7 @@
       ((first (set))
        (second (set))
        (third (set)))
-      ((element s))
+      ((element (in-set s)))
     (cond [(first-group? element)
            (values (set-add first element) second third)]
           [(second-group? element)
