@@ -94,7 +94,7 @@
 
 
 ;; A [FlowAnalysis FState FV] is a
-;;   (FlowAnalysis FState
+;;   (FlowAnalysis [SetOf FState]
 ;;                 [FState -> Boolean]
 ;;                 [FState -> Boolean]
 ;;                 [FState FState -> Boolean]
@@ -104,9 +104,9 @@
 ;;                 [FState -> FState]
 ;;                 [FState FState -> Fstate])
 (define-struct FlowAnalysis
-  (initial-state open? close?
-                 lattice same-sub-lattice? sub-lattice-hash-code
-                 NextStates/Flow NextStatesAcross/Flow))
+  (initial-states open? close?
+                  lattice same-sub-lattice? sub-lattice-hash-code
+                  NextStates/Flow NextStatesAcross/Flow))
 ;;
 ;; open? identifies states which initiate balanced paths (and, consequently,
 ;; cannot be intermediary nodes of balanced paths, i.e. if BP = (start, n1, n2,
@@ -122,7 +122,7 @@
 ;;        Summaries
 ;;        Callers
 (define (CFA2 flow-analysis)
-  (match-define (FlowAnalysis initial-state open? close?
+  (match-define (FlowAnalysis initial-states open? close?
                               fstate-semi-lattice
                               fstate-same-sub-lattice?
                               fstate-sub-lattice-hash-code
@@ -281,10 +281,13 @@
       (Propagate push s W Paths)))
 
   (let-values (((W Paths)
-                (propagate-loop initial-state
-                                (NextStates/Flow initial-state)
-                                empty-W/Paths-set
-                                empty-W/Paths-set)))
+                (for/fold ((W empty-W/Paths-set)
+                           (Paths empty-W/Paths-set))
+                          ((initial-state (in-set initial-states)))
+                  (propagate-loop initial-state
+                                  (NextStates/Flow initial-state)
+                                  W
+                                  Paths))))
     (loop W Paths empty-Summaries-set empty-Callers-set)))
 
 ;; tri-partition-set : [X -> Boolean]

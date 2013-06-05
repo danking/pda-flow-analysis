@@ -51,7 +51,7 @@
                            (state s~ (next-flow s flow)))])]
          [pop-succ-states (lambda (push pop)
                             (succ-states pop))])
-    (FlowAnalysis (state 1 3)
+    (FlowAnalysis (set (state 1 3))
                   push? pop? state-equal?
                   join gte state-similar?
                   succ-states pop-succ-states)))
