@@ -98,7 +98,7 @@
 ;;
 ;; A [FlowAnalysis FlowState, Configuration] is a
 ;;
-;;   (FlowAnalysis FlowState
+;;   (FlowAnalysis [SetOf FlowState]
 ;;                 Configuration
 ;;                 (FlowState -> Boolean)
 ;;                 (FlowState -> Boolean)
