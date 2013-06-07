@@ -4,7 +4,7 @@
          "bp.rkt"
          ;; TODO this should be some built-in module
          "../lattice/lattice.rkt")
-(provide FlowAnalysis CFA2)
+(provide FlowAnalysis PDA2)
 (module+ test (require rackunit))
 
 ;; `CFA2' is an flow analysis algorithm for push down automata. A push down
@@ -77,37 +77,46 @@
 ;; value.
 
 
-;; W : [SetOf BP]
+;; W : [SetOf [BP FlowState]]
 ;;   if (x,y) is in the W, or workset, then there is a balanced path from x to y
 ;;   whose implications have not yet been propagated.
 ;;
-;; Paths : [SetOf BP]
+;; Paths : [SetOf [BP FlowState]]
 ;;   if (x,y) is in the paths set then there is a balanced path from x to y.
 ;;
-;; Summaries : [SetOf BP]
+;; Summaries : [SetOf [BP FlowState]]
 ;;   if (x,y) is in the summaries set then there is a balanced path from x to y
 ;;   and y is a close state.
 ;;
-;; Callers : [SetOf BP]
+;; Callers : [SetOf [BP FlowState]]
 ;;   if (x,y) is in the callers set then there is a balanced path frmo x to y
 ;;   and y is a open state.
 
-
-;; A [FlowAnalysis FState FV] is a
-;;   (FlowAnalysis [SetOf FState]
-;;                 [FState -> Boolean]
-;;                 [FState -> Boolean]
-;;                 [FState FState -> Boolean]
-;;                 [Semi-Lattice FV]
-;;                 [FState FState -> Boolean]
-;;                 [FState -> Number]
-;;                 [FState -> FState]
-;;                 [FState FState -> Fstate])
-(define-struct FlowAnalysis
-  (initial-states open? close?
-                  lattice same-sub-lattice? sub-lattice-hash-code
-                  NextStates/Flow NextStatesAcross/Flow))
+;; It is often desirable to carry around some state which is global to the entire
+;; analysis. For example, widening the store asks for a store to be kept
+;; globally. For this reason we augment the analysis as follows.
 ;;
+;; A [FlowAnalysis FlowState, Configuration] is a
+;;
+;;   (FlowAnalysis FlowState
+;;                 Configuration
+;;                 (FlowState -> Boolean)
+;;                 (FlowState -> Boolean)
+;;                 [Semi-Lattice FlowStates]
+;;                 (FlowState FlowState -> Boolean)
+;;                 (FlowState -> Natural)
+;;                 (FlowState FlowState Configuration
+;;                   -> [Values FlowState Configuration])
+;;                 (FlowState FlowState FlowState Configuration
+;;                   -> [Values FlowState Configuration]))
+
+(define-struct FlowAnalysis
+  (initial-states initial-configuration
+   open? close?
+   flow-state-lattice
+   same-sub-lattice? sub-lattice-hash-code
+   flow-state-successors flow-state-successors-across))
+
 ;; open? identifies states which initiate balanced paths (and, consequently,
 ;; cannot be intermediary nodes of balanced paths, i.e. if BP = (start, n1, n2,
 ;; ..., end) then forall i, ni cannot be open?)
@@ -116,18 +125,22 @@
 ;; also cannot be intermediary nodes of balanced paths)
 
 
-;; CFA2 : [FlowAnalysis FState FV]
+;; PDA2 : [FlowAnalysis FState]
 ;;        ->
 ;;        Paths
 ;;        Summaries
 ;;        Callers
-(define (CFA2 flow-analysis)
-  (match-define (FlowAnalysis initial-states open? close?
+(define (PDA2 flow-analysis)
+  (match-define (FlowAnalysis initial-states initial-configuration
+                              open? close?
                               fstate-semi-lattice
                               fstate-same-sub-lattice?
                               fstate-sub-lattice-hash-code
-                              NextStates/Flow NextStatesAcross/Flow)
+                              flow-state-successors
+                              flow-state-successors-across)
                 flow-analysis)
+
+  (define fstate-gte? (semi-lattice-gte? fstate-semi-lattice))
 
   (define bp-lattice
     (pointwise-semi-lattice BP
@@ -137,10 +150,6 @@
   (define (bp-same-sub-lattice? bp1 bp2 [recur equal?])
     (and (fstate-same-sub-lattice? (BP-open bp1) (BP-open bp2) recur)
          (fstate-same-sub-lattice? (BP-node bp1) (BP-node bp2) recur)))
-
-  (define (bp-pset-add/join bp-pset bp)
-    (pset-add/join bp-pset bp bp-lattice))
-
 
   ;; note that we use (equal-hash-code (list ...)) to delegate choosing a good
   ;; way of combining hash codes to Racket
@@ -155,7 +164,7 @@
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Callers Set
 
-  ;; get-callers : Callers FState -> [SetOf FState]
+  ;; MatchingCallers : Callers FState -> [SetOf FState]
   ;;
   ;; {(o1,o2) | open ⊒ o2 ∧ (o1,o2) ∈ Callers }
   ;;
@@ -166,9 +175,9 @@
   ;; will not propagate all the information. This results in an unsafe
   ;; approximation.
   ;;
-  (define (get-callers Callers open)
+  (define (MatchingCallers Callers open)
     (for/set ((call (pset-equivclass-partition Callers (BP #f open)))
-              #:when ((semi-lattice-gte? fstate-semi-lattice) open (BP-node call)))
+              #:when (fstate-gte? open (BP-node call)))
       call))
 
   (define (comparable-callee? bp1 bp2 [recur equal?])
@@ -185,7 +194,7 @@
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Summaries Set
 
-  ;; get-summaries : Summaries FState -> [SetOf FState]
+  ;; MatchingSummaries : Summaries FState -> [SetOf FState]
   ;;
   ;; {(s-open,s-close) | s-open ⊒ open ∧ (s-open,s-close) ∈ Summaries }
   ;;
@@ -194,10 +203,9 @@
   ;; summary's open, then we needn't reinvestigate this
   ;; empty-stack-to-empty-stack path.
   ;;
-  (define (get-summaries Summaries open)
+  (define (MatchingSummaries Summaries open)
     (for/set ((summary (pset-equivclass-partition Summaries (BP open #f)))
-              #:when ((semi-lattice-gte? fstate-semi-lattice) (BP-open summary)
-                                                              open))
+              #:when (fstate-gte? (BP-open summary) open))
       summary))
 
   (define (comparable-caller? bp1 bp2 [recur equal?])
@@ -213,82 +221,139 @@
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-  (define (loop W Paths Summaries Callers)
+  (define-syntax-rule (splat-loop w-paths-configuration Summaries Callers)
+    (let-values (((W Paths Configuration) w-paths-configuration))
+      (loop W Paths Configuration Summaries Callers)))
+
+  (define (loop W Paths Configuration Summaries Callers)
     (if (pset-empty? W)
-        (values Paths Summaries Callers)
+        (values Paths Configuration Summaries Callers)
         (let-values
             (((task W) (pset-get-one/rest W)))
-          (log-info "[loop] investigating: ~v\n" task)
           (match task
             ((BP open (? close? close))
              (log-info "summary ~a to ~a" open close)
-             (let-values
-                 (((W Paths)
-                   (for/fold ([W W]
-                              [Paths Paths])
-                       ([call (in-set (get-callers Callers open))])
-                     (match call
-                       ((BP grandfather-open _)
-                        (PropagateAcross grandfather-open open close
-                                         W Paths))))))
-
-               (loop W Paths (bp-pset-add/join Summaries task) Callers)))
+             (splat-loop (PropagateCallers (MatchingCallers Callers open)
+                                           close
+                                           W
+                                           Paths
+                                           Configuration)
+                         (pset-add Summaries (BP open close))
+                         Callers))
             ((BP open1 (? open? open2))
              (log-info "call ~a to ~a" open1 open2)
-             (let-values
-                 (((W Paths)
-                   (let ((summaries (get-summaries Summaries open2)))
-                     (if (set-empty? summaries)
-                         (begin (log-info "No summaries found for ~a to ~a"
-                                          open1 open2)
-                                (propagate-loop open2 (NextStates/Flow open2)
-                                                W Paths))
-                         (for/fold ([W W]
-                                    [Paths Paths])
-                             ([summary (in-set summaries)])
-                           (match summary
-                             ((BP open~ close~)
-                              (PropagateAcross open1 open~ close~ W Paths))))))))
-               (loop W Paths Summaries (bp-pset-add/join Callers task))))
+             (splat-loop (MaybePropagateSummaries (MatchingSummaries Summaries
+                                                                     open2)
+                                                  open2
+                                                  open1
+                                                  W
+                                                  Paths
+                                                  Configuration)
+                         Summaries
+                         (pset-add Callers (BP open1 open2))))
             ((BP open node)
-             (log-info "step ~a to ~a" open node)
-             (let-values
-                 (((W Paths)
-                   (propagate-loop open (NextStates/Flow node)
-                                   W Paths)))
-               (loop W Paths Summaries Callers)))))))
+             (log-info "path ~a to ~a" open node)
+             (splat-loop (Propagate open node W Paths Configuration)
+                         Summaries
+                         Callers))))))
 
-  ;; Propogate : OpenFState FState W Paths -> W Paths
-  (define (Propagate open node W Paths)
-    (define bp (BP open node))
-    (define Paths-equivclass (pset-equivclass-partition Paths bp))
-    (define W-equivclass (pset-equivclass-partition W bp))
+  ;; PropagateCallers : [SetOf [BP FState]] FState W Paths Configuration
+  ;;                    ->
+  ;;                    W Paths Configuration
+  ;;
+  (define (PropagateCallers callers close W Paths Configuration)
+    (for/fold ((W W)
+               (Paths Paths)
+               (Configuration Configuration))
+        ((call (in-set callers)))
+      (match-let (((BP gp open) call))
+        (PropagateAcross gp open close W Paths Configuration))))
 
-    (if (pset-greater-or-equal-is-member? Paths bp bp-lattice)
-        (values W Paths)
-        (values (bp-pset-add/join W bp)
-                (bp-pset-add/join Paths bp))))
+  ;; MaybePropagateSummaries : [SetOf [BP FState]]
+  ;;                           FState
+  ;;                           FState
+  ;;                           W Paths Configuration
+  ;;                           ->
+  ;;                           W Paths Configuration
+  ;;
+  ;; if there are no summaries, we must instead explore the new BP
+  (define (MaybePropagateSummaries summaries open gp W Paths Configuration)
+    (if (set-empty? summaries)
+        (Enter open W Paths Configuration)
+        (PropagateSummaries summaries gp W Paths Configuration)))
 
-  ;; PropogateAcross : FState FState State W Paths -> W Paths
-  (define (PropagateAcross grandfather-open open close W Paths)
-    (propagate-loop grandfather-open (NextStatesAcross/Flow open close) W Paths))
+  ;; PropagateSummaries : [SetOf [BP FState]] FState W Paths Configuration
+  ;;                      ->
+  ;;                      W Paths Configuration
+  ;;
+  (define (PropagateSummaries summaries gp W Paths Configuration)
+    (for/fold ((W W)
+               (Paths Paths)
+               (Configuration Configuration))
+        ((summary (in-set summaries)))
+      (match-let (((BP open close) summary))
+        (PropagateAcross gp open close W Paths Configuration))))
 
-  ;; propagate-loop : FState [SetOf FState] W Paths -> W Paths
-  (define (propagate-loop push succs W Paths)
-    (for/fold ([W W]
-               [Paths Paths])
-        ([s (in-set succs)])
-      (Propagate push s W Paths)))
+  ;; Enter : FState W Paths Configuration -> W Paths Configuration
+  ;;
+  (define (Enter open W Paths Configuration)
+    (Propagate open open W Paths Configuration))
 
-  (let-values (((W Paths)
-                (for/fold ((W empty-W/Paths-set)
-                           (Paths empty-W/Paths-set))
-                          ((initial-state (in-set initial-states)))
-                  (propagate-loop initial-state
-                                  (NextStates/Flow initial-state)
-                                  W
-                                  Paths))))
-    (loop W Paths empty-Summaries-set empty-Callers-set)))
+  ;; Propagate : FState W Paths Configuration -> W Paths Configuration
+  ;;
+  (define (Propagate open node W Paths Configuration)
+    (let-values (((succs Configuration)
+                  (flow-state-successors open node Configuration)))
+      (AddAll W Paths Configuration open succs)))
+
+  ;; PropagateAcross : FState FState FState W Paths Configuration
+  ;;                   ->
+  ;;                   W Paths Configuration
+  ;;
+  (define (PropagateAcross gp open node W Paths Configuration)
+    (let-values (((succs Configuration)
+                  (flow-state-successors-across gp open node Configuration)))
+      (AddAll W Paths Configuration gp succs)))
+
+  ;; AddAll : W Paths Configuration FState FState
+  ;;
+  (define (AddAll W Paths Configuration open succs)
+    (for/fold ((W W)
+               (Paths Paths)
+               (Configuration Configuration))
+        ((succ (in-set succs)))
+      (let ((bp (BP open succ)))
+        (if (AlreadySubsumedInSet? Paths bp)
+            (values W Paths Configuration)
+            (values (JoiningSetAdd W bp)
+                    (pset-add Paths bp)
+                    Configuration)))))
+
+  ;; AlreadySubsumedInSet? : [PartitionedSet X] X -> Boolean
+  ;;
+  ;; NB: Elements which are not in the same partition should be incomparable in
+  ;; the lattice.
+  ;;
+  ;; Determines if any element of pset is greater than or equal to v according to
+  ;; v-lattice.
+  (define (AlreadySubsumedInSet? pset v)
+    (define equivclass (pset-equivclass-partition pset v))
+    (define gte? (semi-lattice-gte? bp-lattice))
+
+    (for/or ((v~ (in-set equivclass))) (gte? v~ v)))
+
+  (define JoiningSetAdd (curry pset-add/join bp-lattice))
+
+  (splat-loop (for/fold ((W empty-W/Paths-set)
+                         (Paths empty-W/Paths-set)
+                         (Configuration initial-configuration))
+                  ((initial-state initial-states))
+                (Enter initial-state W Paths Configuration))
+              empty-Summaries-set
+              empty-Callers-set))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Utilities
 
 ;; tri-partition-set : [X -> Boolean]
 ;;                     [X -> Boolean]
@@ -322,12 +387,12 @@
     (check-equal? strings (set "foo" "bar" "baz"))
     (check-equal? others (set 1 2 3 4 21))))
 
-;; pset-add/join : [PartitionedSet X] X [Semi-Lattice X] -> [PartitionedSet X]
+;; pset-add/join : [Semi-Lattice X] [PartitionedSet X] X -> [PartitionedSet X]
 ;;
 ;; Adds v to pset if nothing in v is greater than or equal to it and removes
 ;; anything from the set which is less than it.
 ;;
-(define (pset-add/join pset v v-lattice)
+(define (pset-add/join v-lattice pset v)
   (define equivclass (pset-equivclass-partition pset v))
   (define gte? (semi-lattice-gte? v-lattice))
 
@@ -340,19 +405,6 @@
           [(not (set-empty? lesser))
            (pset-add (pset-subtract-set pset lesser) v)]
           [else (pset-add pset v)])))
-
-;; pset-greater-or-equal-is-member? : [PartitionedSet X] X [Semi-Lattice X] -> Boolean
-;;
-;; NB: Elements which are not in the same partition should be incomparable in
-;; the lattice.
-;;
-;; Determines if any element of pset is greater than or equal to v according to
-;; v-lattice.
-(define (pset-greater-or-equal-is-member? pset v v-lattice)
-  (define equivclass (pset-equivclass-partition pset v))
-  (define gte? (semi-lattice-gte? v-lattice))
-
-  (for/or ((v~ (in-set equivclass))) (gte? v~ v)))
 
 ;; pset-subtract-set : [PartitionedSet X] [SetOf X] -> [PartitionedSet X]
 ;;
