@@ -112,7 +112,8 @@
   (FlowAnalysis (set (flow-state (abstract-state (uid->node 1) (hash) 'ε) 5))
                 push? pop? state-equal?
                 join gte state-similar?
-                succ-states/flow pop-succ-states/flow))
+                succ-states/flow pop-succ-states/flow
+                identity))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Previous States
@@ -147,7 +148,8 @@
   (FlowAnalysis (set (flow-state initial-abstract-state (set)))
                 push? pop? state-equal?
                 join gte state-similar?
-                succ-states/flow pop-succ-states/flow))
+                succ-states/flow pop-succ-states/flow
+                identity))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Minimum Needed
@@ -219,7 +221,8 @@
                                  0))
                 push? pop? state-equal?
                 join gte state-similar?
-                prev-states/flow push-prev-states/flow))
+                prev-states/flow push-prev-states/flow
+                identity))
 
 (require rackunit
          rackunit/text-ui

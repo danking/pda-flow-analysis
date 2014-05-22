@@ -2,6 +2,7 @@
 (require "../racket-utils/partitioned-sets.rkt"
          "../semantics/flow.rkt"
          "bp.rkt"
+         "log-harness.rkt"
          ;; TODO this should be some built-in module
          "../lattice/lattice.rkt")
 (provide FlowAnalysis PDA2)
@@ -108,14 +109,16 @@
 ;;                 (FlowState FlowState Configuration
 ;;                   -> [Values FlowState Configuration])
 ;;                 (FlowState FlowState FlowState Configuration
-;;                   -> [Values FlowState Configuration]))
+;;                   -> [Values FlowState Configuration])
+;;                 (FlowState -> String))
 
 (define-struct FlowAnalysis
   (initial-states initial-configuration
    open? close?
    flow-state-lattice
    same-sub-lattice? sub-lattice-hash-code
-   flow-state-successors flow-state-successors-across))
+   flow-state-successors flow-state-successors-across
+   flowstate-debug-string))
 
 ;; open? identifies states which initiate balanced paths (and, consequently,
 ;; cannot be intermediary nodes of balanced paths, i.e. if BP = (start, n1, n2,
@@ -137,7 +140,8 @@
                               fstate-same-sub-lattice?
                               fstate-sub-lattice-hash-code
                               flow-state-successors
-                              flow-state-successors-across)
+                              flow-state-successors-across
+                              flowstate-debug-string)
                 flow-analysis)
 
   (define fstate-gte? (semi-lattice-gte? fstate-semi-lattice))
@@ -226,13 +230,18 @@
       (loop W Paths Configuration Summaries Callers)))
 
   (define (loop W Paths Configuration Summaries Callers)
+    (log-info* "Magnitudes: (W Paths Summaries Callers) = (~a ~a ~a ~a)"
+               (pset-count W) (pset-count Paths)
+               (pset-count Summaries) (pset-count Callers))
     (if (pset-empty? W)
         (values Paths Configuration Summaries Callers)
         (let-values
             (((task W) (pset-get-one/rest W)))
           (match task
             ((BP open (? close? close))
-             (log-info "summary ~a to ~a" open close)
+             (log-info* "summary: ")
+             (log-info* (flowstate-debug-string open))
+             (log-info* (flowstate-debug-string close))
              (splat-loop (PropagateCallers (MatchingCallers Callers open)
                                            close
                                            W
@@ -241,7 +250,9 @@
                          (pset-add Summaries (BP open close))
                          Callers))
             ((BP open1 (? open? open2))
-             (log-info "call ~a to ~a" open1 open2)
+             (log-info* "call: ")
+             (log-info* (flowstate-debug-string open1))
+             (log-info* (flowstate-debug-string open2))
              (splat-loop (MaybePropagateSummaries (MatchingSummaries Summaries
                                                                      open2)
                                                   open2
@@ -252,7 +263,9 @@
                          Summaries
                          (pset-add Callers (BP open1 open2))))
             ((BP open node)
-             (log-info "path ~a to ~a" open node)
+             (log-info* "path: ")
+             (log-info* (flowstate-debug-string open))
+             (log-info* (flowstate-debug-string node))
              (splat-loop (Propagate open node W Paths Configuration)
                          Summaries
                          Callers))))))

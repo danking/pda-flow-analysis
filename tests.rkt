@@ -54,7 +54,8 @@
     (FlowAnalysis (set (state 1 3))
                   push? pop? state-equal?
                   join gte state-similar?
-                  succ-states pop-succ-states)))
+                  succ-states pop-succ-states
+                  identity)))
 
 (define (simple-min-needed)
   (let* ([push? (match-lambda
@@ -105,7 +106,8 @@
     (FlowAnalysis (state 10 0)
                   pop? push? state-equal?
                   join gte state-similar?
-                  prev-states pop-prev-states)))
+                  prev-states pop-prev-states
+                  identity)))
 
 (require rackunit
          rackunit/text-ui)
