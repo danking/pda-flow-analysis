@@ -1,5 +1,6 @@
 #lang racket
 (require "../racket-utils/partitioned-sets.rkt"
+         "../racket-utils/partitioned-priority-queue.rkt"
          "../semantics/flow.rkt"
          "bp.rkt"
          "log-harness.rkt"
@@ -110,7 +111,8 @@
 ;;                   -> [Values FlowState Configuration])
 ;;                 (FlowState FlowState FlowState Configuration
 ;;                   -> [Values FlowState Configuration])
-;;                 (FlowState -> String))
+;;                 (FlowState -> String)
+;;                 (FlowState -> Real))
 
 (define-struct FlowAnalysis
   (initial-states initial-configuration
@@ -118,7 +120,8 @@
    flow-state-lattice
    same-sub-lattice? sub-lattice-hash-code
    flow-state-successors flow-state-successors-across
-   flowstate-debug-string))
+   flowstate-debug-string
+   flowstate-priority))
 
 ;; open? identifies states which initiate balanced paths (and, consequently,
 ;; cannot be intermediary nodes of balanced paths, i.e. if BP = (start, n1, n2,
@@ -141,7 +144,8 @@
                               fstate-sub-lattice-hash-code
                               flow-state-successors
                               flow-state-successors-across
-                              flowstate-debug-string)
+                              flowstate-debug-string
+                              fstate-priority)
                 flow-analysis)
 
   (define fstate-gte? (semi-lattice-gte? fstate-semi-lattice))
@@ -161,9 +165,20 @@
     (equal-hash-code (list (fstate-sub-lattice-hash-code (BP-open bp) recur)
                            (fstate-sub-lattice-hash-code (BP-node bp) recur))))
 
-  (define empty-W/Paths-set
+  (define/match (bp-priority-queue-<= bp1 bp2)
+    [((BP open1 node1) (BP open2 node2))
+     (or (< (fstate-priority open1) (fstate-priority open2))
+         (and (= (fstate-priority open1) (fstate-priority open2))
+              (<= (fstate-priority node1) (fstate-priority node2))))])
+
+  (define empty-Paths-set
     (make-partitioned-set bp-same-sub-lattice?
                           bp-sub-lattice-hash-code))
+
+  (define empty-W
+    (ppq-empty bp-priority-queue-<=
+               bp-same-sub-lattice?
+               bp-sub-lattice-hash-code))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Callers Set
@@ -231,12 +246,12 @@
 
   (define (loop W Paths Configuration Summaries Callers)
     (log-info* "Magnitudes: (W Paths Summaries Callers) = (~a ~a ~a ~a)"
-               (pset-count W) (pset-count Paths)
+               (set-count W) (pset-count Paths)
                (pset-count Summaries) (pset-count Callers))
-    (if (pset-empty? W)
+    (if (set-empty? W)
         (values Paths Configuration Summaries Callers)
         (let-values
-            (((task W) (pset-get-one/rest W)))
+            (((task W) (values (set-first W) (set-rest W))))
           (match task
             ((BP open (? close? close))
              (log-info* "summary: ")
@@ -338,7 +353,7 @@
       (let ((bp (BP open succ)))
         (if (AlreadySubsumedInSet? Paths bp)
             (values W Paths Configuration)
-            (values (JoiningSetAdd W bp)
+            (values (JoinOrAddToW W bp)
                     (pset-add Paths bp)
                     Configuration)))))
 
@@ -355,10 +370,10 @@
 
     (for/or ((v~ (in-set equivclass))) (gte? v~ v)))
 
-  (define JoiningSetAdd (curry pset-add/join bp-lattice))
+  (define JoinOrAddToW (curry ppq-add/join bp-lattice))
 
-  (splat-loop (for/fold ((W empty-W/Paths-set)
-                         (Paths empty-W/Paths-set)
+  (splat-loop (for/fold ((W empty-W)
+                         (Paths empty-Paths-set)
                          (Configuration initial-configuration))
                   ((initial-state initial-states))
                 (Enter initial-state W Paths Configuration))
@@ -400,13 +415,13 @@
     (check-equal? strings (set "foo" "bar" "baz"))
     (check-equal? others (set 1 2 3 4 21))))
 
-;; pset-add/join : [Semi-Lattice X] [PartitionedSet X] X -> [PartitionedSet X]
+;; ppq-add/join : [Semi-Lattice X] [PartitionedSet X] X -> [PartitionedSet X]
 ;;
-;; Adds v to pset if nothing in v is greater than or equal to it and removes
-;; anything from the set which is less than it.
+;; Adds v to ppq if nothing in v is greater than or equal to it and removes
+;; anything from ppq which is less than it.
 ;;
-(define (pset-add/join v-lattice pset v)
-  (define equivclass (pset-equivclass-partition pset v))
+(define (ppq-add/join v-lattice ppq v)
+  (define equivclass (ppq-equivclass-partition ppq v))
   (define gte? (semi-lattice-gte? v-lattice))
 
   (let-values
@@ -414,15 +429,7 @@
         (tri-partition-set (lambda (x) (gte? x v))
                            (lambda (x) (gte? v x))
                            equivclass)))
-    (cond [(not (set-empty? greater-or-eq)) pset]
+    (cond [(not (set-empty? greater-or-eq)) ppq]
           [(not (set-empty? lesser))
-           (pset-add (pset-subtract-set pset lesser) v)]
-          [else (pset-add pset v)])))
-
-;; pset-subtract-set : [PartitionedSet X] [SetOf X] -> [PartitionedSet X]
-;;
-(define (pset-subtract-set pset set)
-  (for/fold
-      ((pset pset))
-      ((element (in-set set)))
-    (pset-remove pset element)))
+           (set-add (set-subtract ppq lesser) v)]
+          [else (set-add ppq v)])))
