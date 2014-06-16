@@ -107,9 +107,9 @@
 ;;                 (FlowState FlowState -> Boolean)
 ;;                 (FlowState -> Natural)
 ;;                 (FlowState FlowState Configuration
-;;                   -> [Values FlowState Configuration])
+;;                   -> [Values [SetOf FlowState] Configuration])
 ;;                 (FlowState FlowState FlowState Configuration
-;;                   -> [Values FlowState Configuration])
+;;                   -> [Values [SetOf FlowState] Configuration])
 ;;                 (FlowState -> String))
 
 (define-struct FlowAnalysis
